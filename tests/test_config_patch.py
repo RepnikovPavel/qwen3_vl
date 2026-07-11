@@ -4,13 +4,13 @@ from pathlib import Path
 
 from qwen3_vl_offline import (
     DEFAULT_CKPT_DIR,
-    MODEL_CACHE_NAME,
     load_patched_config,
     validate_checkpoint,
 )
+from model_catalog import get_model_spec
 
 
-MODEL_PATH = DEFAULT_CKPT_DIR / MODEL_CACHE_NAME / "snapshots" / "main"
+MODEL_PATH = DEFAULT_CKPT_DIR / get_model_spec("2b").cache_name / "snapshots" / "main"
 
 
 @unittest.skipUnless(MODEL_PATH.is_dir(), f"local checkpoint not found: {MODEL_PATH}")

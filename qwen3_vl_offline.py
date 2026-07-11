@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared strict-offline runner for Qwen3-VL-2B-Thinking-FP8.
+"""Shared strict-offline runtime for Qwen3-VL Thinking FP8 checkpoints.
 
 The checkpoint was published with ``ignored_layers`` while older Transformers
 releases expect ``modules_to_not_convert``.  Without translating that field,
@@ -10,13 +10,18 @@ do not exist in the checkpoint.  Those uninitialised scales produce NaN logits.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import json
+import math
 import os
 import sys
+import time
 from collections import Counter
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from types import ModuleType
+from typing import Any, Sequence
 
 
 # These values must be set before importing huggingface_hub or Transformers.
@@ -51,6 +56,7 @@ _install_network_guard()
 
 import torch
 from PIL import Image
+from PIL import ImageOps
 from transformers import (
     AutoConfig,
     AutoProcessor,
@@ -59,9 +65,13 @@ from transformers import (
 )
 from transformers.integrations.finegrained_fp8 import FP8Linear
 
+from model_catalog import MODEL_SPECS, get_model_spec, normalize_model_size
+from download_models import verify_checkpoint
+
 
 DEFAULT_CKPT_DIR = Path("/mnt/nvme/huggingface")
-MODEL_CACHE_NAME = "models--Qwen--Qwen3-VL-2B-Thinking-FP8"
+NATIVE_CONTEXT_TOKENS = 262_144
+YARN_CONTEXT_TOKENS = 1_000_000
 DEFAULT_IMAGE = Path(
     "/mnt/nvme/rowdata/nu/samples/CAM_BACK_RIGHT/"
     "n008-2018-08-30-15-16-55-0400__CAM_BACK_RIGHT__1535657109278113.jpg"
@@ -74,6 +84,49 @@ REQUIRED_FILES = {
     "tokenizer.json",
     "tokenizer_config.json",
 }
+
+
+@dataclass(frozen=True)
+class MediaItem:
+    kind: str
+    value: Any
+    label: str
+    original_size: tuple[int, int] | None = None
+    processed_size: tuple[int, int] | None = None
+
+
+@dataclass(frozen=True)
+class GenerationResult:
+    text: str
+    raw_text: str
+    reasoning: str | None
+    answer: str
+    finish_reason: str
+    truncated: bool
+    prompt_tokens: int
+    generated_tokens: int
+    media_seconds: float
+    preprocess_seconds: float
+    generation_seconds: float
+    total_seconds: float
+    tokens_per_second: float
+    peak_vram_mb: float | None
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+class OrderedMediaAction(argparse.Action):
+    """Keep the exact interleaving of repeated --image and --video flags."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        del parser
+        items = getattr(namespace, self.dest, None)
+        if items is None:
+            items = []
+        kind = "image" if option_string == "--image" else "video"
+        items.append((kind, values))
+        setattr(namespace, self.dest, items)
 
 
 class FiniteLogitsProcessor(LogitsProcessor):
@@ -92,51 +145,53 @@ class FiniteLogitsProcessor(LogitsProcessor):
         return scores
 
 
-def resolve_model_path(model_path: str | None, ckpt_dir: str) -> Path:
+def resolve_model_path(model_path: str | None, ckpt_dir: str, model_size: str = "2b") -> Path:
     if model_path:
         return Path(model_path).expanduser().resolve()
-    return (Path(ckpt_dir).expanduser() / MODEL_CACHE_NAME / "snapshots" / "main").resolve()
+    spec = get_model_spec(model_size)
+    return (Path(ckpt_dir).expanduser() / spec.cache_name / "snapshots" / "main").resolve()
 
 
-def validate_checkpoint(model_path: Path) -> dict[str, object]:
-    """Validate that every model/config file referenced by the index is local."""
+def validate_checkpoint(
+    model_path: Path, model_size: str | None = None, *, full: bool = False
+) -> dict[str, object]:
+    """Run the shared safe-path/index/header verifier used by the downloader."""
 
-    if not model_path.is_dir():
-        raise FileNotFoundError(f"local checkpoint directory does not exist: {model_path}")
-
-    missing = sorted(name for name in REQUIRED_FILES if not (model_path / name).is_file())
-    if missing:
-        raise FileNotFoundError(f"checkpoint is incomplete; missing: {', '.join(missing)}")
-
-    index = json.loads((model_path / "model.safetensors.index.json").read_text(encoding="utf-8"))
-    weight_map = index.get("weight_map")
-    if not isinstance(weight_map, dict) or not weight_map:
-        raise ValueError("model.safetensors.index.json has no non-empty weight_map")
-
-    weight_files = sorted(set(weight_map.values()))
-    missing_weights = [name for name in weight_files if not (model_path / name).is_file()]
-    if missing_weights:
-        raise FileNotFoundError(f"checkpoint weight files are missing: {', '.join(missing_weights)}")
-
+    resolved_spec = get_model_spec(model_size) if model_size is not None else None
+    verified = verify_checkpoint(model_path, spec=resolved_spec, full=full)
     config_data = json.loads((model_path / "config.json").read_text(encoding="utf-8"))
     quant = config_data.get("quantization_config")
-    if not isinstance(quant, dict) or quant.get("quant_method") != "fp8":
-        raise ValueError("expected a fine-grained FP8 checkpoint")
-
+    if not isinstance(quant, dict):  # defensive: verify_checkpoint already checks this
+        raise ValueError("checkpoint config has no FP8 quantization object")
     skip = quant.get("modules_to_not_convert") or quant.get("ignored_layers")
     if not isinstance(skip, list) or not skip:
         raise ValueError("FP8 config has no ignored/modules_to_not_convert layer list")
-
-    scale_keys = [key for key in weight_map if key.endswith(".weight_scale_inv")]
-    if not scale_keys:
-        raise ValueError("checkpoint index has no FP8 scale tensors")
-
     return {
-        "tensor_count": len(weight_map),
-        "scale_count": len(scale_keys),
+        **verified,
         "skip_count": len(skip),
-        "weight_files": weight_files,
+        "weight_files": verified["shards"],
     }
+
+
+def validate_generation_settings(
+    *,
+    max_new_tokens: int,
+    max_image_side: int,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    cpu_threads: int,
+) -> None:
+    if max_new_tokens < 1 or max_image_side < 1:
+        raise ValueError("max_new_tokens and max_image_side must be positive")
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("temperature must be a finite positive number")
+    if not math.isfinite(top_p) or not 0 < top_p <= 1:
+        raise ValueError("top_p must be a finite number in (0, 1]")
+    if top_k < 1:
+        raise ValueError("top_k must be positive")
+    if cpu_threads < 1:
+        raise ValueError("cpu_threads must be positive")
 
 
 def load_patched_config(model_path: Path, device: str):
@@ -162,6 +217,32 @@ def load_patched_config(model_path: Path, device: str):
     quant["modules_to_not_convert"] = skip
     quant["dequantize"] = device == "cpu"
     config.quantization_config = quant
+    return config
+
+
+def enable_official_yarn_1m(config):
+    """Apply Qwen's documented Interleaved-MRoPE 256K -> 1M settings in memory."""
+
+    text_config = config.get_text_config()
+    native_limit = int(text_config.max_position_embeddings)
+    if native_limit != NATIVE_CONTEXT_TOKENS:
+        raise ValueError(
+            f"YaRN overlay expects a {NATIVE_CONTEXT_TOKENS}-token native config; "
+            f"got {native_limit}"
+        )
+    current_rope = dict(getattr(text_config, "rope_parameters", {}) or {})
+    mrope_section = current_rope.get("mrope_section", [24, 20, 20])
+    text_config.max_position_embeddings = YARN_CONTEXT_TOKENS
+    text_config.rope_parameters = {
+        "rope_type": "yarn",
+        "factor": 3.0,
+        "original_max_position_embeddings": NATIVE_CONTEXT_TOKENS,
+        "mrope_section": mrope_section,
+        "mrope_interleaved": True,
+        "rope_theta": current_rope.get("rope_theta", 5_000_000),
+    }
+    # Transformers 5.5 keeps this legacy alias for serialization/introspection.
+    text_config.rope_scaling = dict(text_config.rope_parameters)
     return config
 
 
@@ -263,6 +344,27 @@ def load_model(model_path: Path, device: str, config, expected_scales: int):
         )
     if device == "cpu" and fp8_names:
         raise RuntimeError("CPU model still contains FP8Linear modules; dequantization did not apply")
+    if device == "cpu":
+        non_fp32 = [
+            name
+            for name, parameter in model.named_parameters()
+            if parameter.is_floating_point() and parameter.dtype != torch.float32
+        ]
+        if non_fp32:
+            raise RuntimeError(
+                "CPU policy requires every floating parameter to be FP32; first offenders: "
+                + ", ".join(non_fp32[:4])
+            )
+        non_fp32_buffers = [
+            name
+            for name, buffer in model.named_buffers()
+            if buffer.is_floating_point() and buffer.dtype != torch.float32
+        ]
+        if non_fp32_buffers:
+            raise RuntimeError(
+                "CPU policy requires every floating buffer to be FP32; first offenders: "
+                + ", ".join(non_fp32_buffers[:4])
+            )
     if device == "cuda" and len(fp8_names) != expected_scales:
         raise RuntimeError(
             f"loaded {len(fp8_names)} FP8 modules but checkpoint has {expected_scales} scale tensors"
@@ -272,68 +374,400 @@ def load_model(model_path: Path, device: str, config, expected_scales: int):
     return model, fp8_names, dtype_counts
 
 
-def load_local_image(image_path: str, max_side: int) -> tuple[Image.Image, tuple[int, int]]:
-    path = Path(image_path).expanduser().resolve()
-    if not path.is_file():
-        raise FileNotFoundError(f"local image does not exist: {path}")
+def _is_remote_reference(value: str) -> bool:
+    lowered = value.lower().strip()
+    return "://" in lowered or lowered.startswith("data:")
 
-    with Image.open(path) as source:
-        image = source.convert("RGB")
-    original_size = image.size
-    if max_side > 0 and max(image.size) > max_side:
-        image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
-    return image, original_size
+
+def load_local_media(
+    media_inputs: Sequence[tuple[str, Any]], max_side: int
+) -> list[MediaItem]:
+    """Load images safely and validate local video paths without network access."""
+
+    result: list[MediaItem] = []
+    for index, (kind, value) in enumerate(media_inputs, start=1):
+        if kind not in {"image", "video"}:
+            raise ValueError(f"unsupported media kind: {kind}")
+
+        if kind == "image" and isinstance(value, Image.Image):
+            image = ImageOps.exif_transpose(value).convert("RGB")
+            label = f"uploaded-image-{index}"
+            original_size = image.size
+        else:
+            text_value = os.fspath(value)
+            if _is_remote_reference(text_value):
+                raise ValueError(f"remote media references are forbidden at runtime: {text_value!r}")
+            path = Path(text_value).expanduser().resolve()
+            if not path.is_file():
+                raise FileNotFoundError(f"local {kind} does not exist: {path}")
+            label = path.name
+            if kind == "video":
+                result.append(MediaItem(kind="video", value=str(path), label=label))
+                continue
+            with Image.open(path) as source:
+                image = ImageOps.exif_transpose(source).convert("RGB")
+            original_size = image.size
+
+        if max_side > 0 and max(image.size) > max_side:
+            image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+        result.append(
+            MediaItem(
+                kind="image",
+                value=image,
+                label=label,
+                original_size=original_size,
+                processed_size=image.size,
+            )
+        )
+    return result
+
+
+def build_messages(
+    media: Sequence[MediaItem],
+    prompt: str,
+    history: Sequence[dict[str, str]] | None = None,
+    media_history_index: int | None = None,
+) -> list[dict[str, Any]]:
+    history_items = list(history or ())
+    if media_history_index is not None:
+        if not 0 <= media_history_index < len(history_items):
+            raise ValueError("media_history_index is outside the supplied history")
+        if history_items[media_history_index].get("role") != "user":
+            raise ValueError("media can only be attached to a user history turn")
+
+    def media_content() -> list[dict[str, Any]]:
+        return [
+            {"type": item.kind, item.kind: item.value}
+            for item in media
+        ]
+
+    messages: list[dict[str, Any]] = []
+    for index, message in enumerate(history_items):
+        role = message.get("role")
+        content = message.get("content")
+        if role not in {"user", "assistant", "system"} or not isinstance(content, str):
+            raise ValueError("history entries require role=user|assistant|system and string content")
+        content_items = media_content() if index == media_history_index else []
+        content_items.append({"type": "text", "text": content})
+        messages.append(
+            {"role": role, "content": content_items}
+        )
+
+    content_items = media_content() if media_history_index is None else []
+    content_items.append({"type": "text", "text": prompt})
+    messages.append({"role": "user", "content": content_items})
+    return messages
+
+
+def _sync(device: str) -> None:
+    if device == "cuda":
+        torch.cuda.synchronize()
+
+
+def _split_reasoning(raw_text: str, clean_text: str, special_tokens: Sequence[str]):
+    marker = "</think>"
+    if marker not in raw_text:
+        return None, clean_text.strip()
+    reasoning_raw, answer_raw = raw_text.split(marker, 1)
+    reasoning = reasoning_raw.rsplit("<think>", 1)[-1]
+    answer = answer_raw
+    for token in special_tokens:
+        answer = answer.replace(token, "")
+        reasoning = reasoning.replace(token, "")
+    answer = answer.strip()
+    reasoning = reasoning.strip()
+    return reasoning or None, answer or clean_text.strip()
 
 
 def generate(
     model,
     processor,
-    image: Image.Image,
+    media: Sequence[MediaItem],
     prompt: str,
     device: str,
     max_new_tokens: int,
-) -> str:
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "image", "image": image},
-                {"type": "text", "text": prompt},
-            ],
-        }
-    ]
+    *,
+    history: Sequence[dict[str, str]] | None = None,
+    do_sample: bool = False,
+    temperature: float = 1.0,
+    top_p: float = 0.95,
+    top_k: int = 20,
+    video_fps: float | None = None,
+    video_num_frames: int | None = 32,
+    media_history_index: int | None = None,
+    check_finite_logits: bool = True,
+) -> GenerationResult:
+    started = time.perf_counter()
+    messages = build_messages(media, prompt, history, media_history_index)
+    processor_kwargs: dict[str, Any] = {}
+    if any(item.kind == "video" for item in media):
+        if video_fps is not None and video_num_frames is not None:
+            raise ValueError("video_fps and video_num_frames are mutually exclusive")
+        if video_fps is not None:
+            processor_kwargs["fps"] = video_fps
+            processor_kwargs["num_frames"] = None
+        if video_num_frames is not None:
+            processor_kwargs["num_frames"] = video_num_frames
+            # Qwen3VLVideoProcessor defaults to fps=2. Passing num_frames
+            # without explicitly clearing that default makes the two sampling
+            # controls collide before preprocessing starts.
+            processor_kwargs["fps"] = None
     inputs = processor.apply_chat_template(
         messages,
         tokenize=True,
         add_generation_prompt=True,
         return_dict=True,
         return_tensors="pt",
+        add_vision_id=len(media) > 1,
+        processor_kwargs=processor_kwargs,
     ).to(device)
+    _sync(device)
+    preprocess_seconds = time.perf_counter() - started
 
-    prompt_tokens = inputs["input_ids"].shape[1]
+    prompt_tokens = int(inputs["input_ids"].shape[1])
+    context_limit = int(model.config.get_text_config().max_position_embeddings)
+    if prompt_tokens + max_new_tokens > context_limit:
+        raise ValueError(
+            f"prompt ({prompt_tokens}) + max_new_tokens ({max_new_tokens}) exceeds "
+            f"the model context limit ({context_limit})"
+        )
+
+    if device == "cuda":
+        torch.cuda.reset_peak_memory_stats()
+    _sync(device)
+    generation_started = time.perf_counter()
     with torch.inference_mode():
-        generated = model.generate(
+        output = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
-            do_sample=False,
-            temperature=None,
-            top_k=None,
-            top_p=None,
+            do_sample=do_sample,
+            temperature=temperature if do_sample else None,
+            top_k=top_k if do_sample else None,
+            top_p=top_p if do_sample else None,
             use_cache=True,
-            logits_processor=[FiniteLogitsProcessor()],
+            logits_processor=[FiniteLogitsProcessor()] if check_finite_logits else None,
+            return_dict_in_generate=True,
         )
-    continuation = generated[:, prompt_tokens:]
-    return processor.batch_decode(
+    _sync(device)
+    generation_seconds = time.perf_counter() - generation_started
+
+    continuation = output.sequences[:, prompt_tokens:]
+    generated_tokens = int(continuation.shape[1])
+    token_ids = continuation[0].tolist()
+    eos_value = model.generation_config.eos_token_id
+    eos_ids = {int(eos_value)} if isinstance(eos_value, int) else {int(item) for item in eos_value or []}
+    ended_with_eos = bool(token_ids and token_ids[-1] in eos_ids)
+    if ended_with_eos:
+        finish_reason = "eos"
+    elif generated_tokens >= max_new_tokens:
+        finish_reason = "max_new_tokens"
+    else:
+        finish_reason = "stopped"
+
+    clean_text = processor.batch_decode(
         continuation,
         skip_special_tokens=True,
         clean_up_tokenization_spaces=False,
+    )[0].strip()
+    raw_text = processor.batch_decode(
+        continuation,
+        skip_special_tokens=False,
+        clean_up_tokenization_spaces=False,
     )[0]
+    tokenizer = getattr(processor, "tokenizer", processor)
+    reasoning, answer = _split_reasoning(raw_text, clean_text, tokenizer.all_special_tokens)
+    peak_vram_mb = (
+        float(torch.cuda.max_memory_allocated() / (1024**2)) if device == "cuda" else None
+    )
+    total_seconds = preprocess_seconds + generation_seconds
+    return GenerationResult(
+        text=clean_text,
+        raw_text=raw_text,
+        reasoning=reasoning,
+        answer=answer,
+        finish_reason=finish_reason,
+        truncated=finish_reason == "max_new_tokens",
+        prompt_tokens=prompt_tokens,
+        generated_tokens=generated_tokens,
+        media_seconds=0.0,
+        preprocess_seconds=preprocess_seconds,
+        generation_seconds=generation_seconds,
+        total_seconds=total_seconds,
+        tokens_per_second=(generated_tokens / generation_seconds if generation_seconds else 0.0),
+        peak_vram_mb=peak_vram_mb,
+    )
 
 
-def build_parser(device: str) -> argparse.ArgumentParser:
-    default_tokens = 4 if device == "cpu" else 32
+class Qwen3VLRuntime:
+    """One loaded model shared by CLI, Web UI, and benchmark frontends."""
+
+    def __init__(
+        self,
+        *,
+        model_size: str = "2b",
+        device: str = "cuda",
+        model_path: str | None = None,
+        ckpt_dir: str = str(DEFAULT_CKPT_DIR),
+        kernel_dir: str | None = None,
+        cpu_threads: int | None = None,
+        seed: int = 0,
+        verbose: bool = True,
+        verify_sha: bool = False,
+        yarn_1m: bool = False,
+    ):
+        if device not in {"cpu", "cuda"}:
+            raise ValueError(f"unsupported device: {device}")
+        if cpu_threads is not None and cpu_threads < 1:
+            raise ValueError("cpu_threads must be positive")
+        self.model_size = normalize_model_size(model_size)
+        self.spec = get_model_spec(self.model_size)
+        self.device = device
+        self.model_path = resolve_model_path(model_path, ckpt_dir, self.model_size)
+        self.checkpoint = validate_checkpoint(
+            self.model_path, self.model_size, full=verify_sha
+        )
+        self.config = load_patched_config(self.model_path, device)
+        if yarn_1m:
+            enable_official_yarn_1m(self.config)
+        self.context_mode = "yarn_1m" if yarn_1m else "native_256k"
+
+        from huggingface_hub.constants import HF_HUB_OFFLINE
+
+        if not HF_HUB_OFFLINE:
+            raise RuntimeError("huggingface_hub was imported before HF_HUB_OFFLINE=1")
+
+        if device == "cpu":
+            threads = cpu_threads or min(os.cpu_count() or 1, 16)
+            torch.set_num_threads(threads)
+            self.kernel_dir = None
+            self.compute_backend = "torch_fp32"
+        else:
+            if not torch.cuda.is_available():
+                raise RuntimeError("CUDA is not available")
+            capability = torch.cuda.get_device_capability()
+            if capability < (8, 9):
+                raise RuntimeError(
+                    f"native fine-grained FP8 requires compute capability >= 8.9; got {capability}"
+                )
+            self.kernel_dir = resolve_local_kernel_dir(kernel_dir)
+            inject_local_fp8_kernel(self.kernel_dir)
+            self.compute_backend = "triton_finegrained_fp8"
+
+        torch.manual_seed(seed)
+        if device == "cuda":
+            torch.cuda.manual_seed_all(seed)
+
+        load_started = time.perf_counter()
+        self.processor = AutoProcessor.from_pretrained(self.model_path, local_files_only=True)
+        self.model, self.fp8_names, self.dtype_counts = load_model(
+            self.model_path,
+            device,
+            self.config,
+            expected_scales=int(self.checkpoint["scale_count"]),
+        )
+        _sync(device)
+        self.load_seconds = time.perf_counter() - load_started
+        self.seed = seed
+
+        if verbose:
+            print(
+                f"checkpoint OK: {self.spec.repo_id} ({self.model_path})\n"
+                f"  tensors={self.checkpoint['tensor_count']} scales={self.checkpoint['scale_count']} "
+                f"excluded_layers={self.checkpoint['skip_count']}\n"
+                "  network_guard=enabled, local_files_only=True"
+            )
+            if device == "cpu":
+                print(f"CPU mode: dequantized FP32, threads={torch.get_num_threads()}")
+            else:
+                capability = torch.cuda.get_device_capability()
+                print(
+                    f"GPU mode: {torch.cuda.get_device_name(0)}, SM{capability[0]}{capability[1]}\n"
+                    f"  local FP8 kernel={self.kernel_dir}"
+                )
+            print(
+                f"model OK: fp8_modules={len(self.fp8_names)}, "
+                f"parameter_dtypes={dict(self.dtype_counts)}, load={self.load_seconds:.3f}s"
+            )
+
+    def prepare_media(
+        self, media_inputs: Sequence[tuple[str, Any]], max_image_side: int
+    ) -> list[MediaItem]:
+        return load_local_media(media_inputs, max_image_side)
+
+    def infer(
+        self,
+        *,
+        media_inputs: Sequence[tuple[str, Any]],
+        prompt: str,
+        max_new_tokens: int = 2048,
+        max_image_side: int = 640,
+        history: Sequence[dict[str, str]] | None = None,
+        do_sample: bool = True,
+        temperature: float = 0.6,
+        top_p: float = 0.95,
+        top_k: int = 20,
+        video_fps: float | None = None,
+        video_num_frames: int | None = 32,
+        media_history_index: int | None = None,
+        check_finite_logits: bool = True,
+    ) -> tuple[GenerationResult, list[MediaItem]]:
+        validate_generation_settings(
+            max_new_tokens=max_new_tokens,
+            max_image_side=max_image_side,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            cpu_threads=torch.get_num_threads(),
+        )
+        if video_fps is not None and (not math.isfinite(video_fps) or video_fps <= 0):
+            raise ValueError("video_fps must be a finite positive number")
+        if video_num_frames is not None and video_num_frames < 1:
+            raise ValueError("video_num_frames must be positive")
+        torch.manual_seed(self.seed)
+        if self.device == "cuda":
+            torch.cuda.manual_seed_all(self.seed)
+        infer_started = time.perf_counter()
+        media = self.prepare_media(media_inputs, max_image_side)
+        media_seconds = time.perf_counter() - infer_started
+        result = generate(
+            self.model,
+            self.processor,
+            media,
+            prompt,
+            self.device,
+            max_new_tokens,
+            history=history,
+            do_sample=do_sample,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            video_fps=video_fps,
+            video_num_frames=video_num_frames,
+            media_history_index=media_history_index,
+            check_finite_logits=check_finite_logits,
+        )
+        result = replace(
+            result,
+            media_seconds=media_seconds,
+            total_seconds=time.perf_counter() - infer_started,
+        )
+        return result, media
+
+
+def build_parser(device: str | None = None) -> argparse.ArgumentParser:
+    label = device.upper() if device else "CPU or CUDA"
     parser = argparse.ArgumentParser(
-        description=f"Run Qwen3-VL-2B-Thinking-FP8 locally on {device.upper()} with network disabled."
+        description=f"Run Qwen3-VL Thinking FP8 locally on {label} with network disabled."
+    )
+    if device is None:
+        parser.add_argument("--device", choices=("cpu", "cuda"), default="cuda")
+    parser.add_argument(
+        "--model",
+        "--model-size",
+        dest="model_size",
+        choices=tuple(MODEL_SPECS),
+        default="2b",
+        help="Thinking FP8 checkpoint size",
     )
     parser.add_argument("--model-path", help="Exact local snapshot directory; overrides --ckpt-dir")
     parser.add_argument(
@@ -343,76 +777,184 @@ def build_parser(device: str) -> argparse.ArgumentParser:
         default=str(DEFAULT_CKPT_DIR),
         help="Hugging Face cache root",
     )
-    parser.add_argument("--image", default=str(DEFAULT_IMAGE), help="Local image path")
-    parser.add_argument("--prompt", default="Describe this driving scene concisely.")
-    parser.add_argument("--max-new-tokens", type=int, default=default_tokens)
-    parser.add_argument("--max-image-side", type=int, default=224 if device == "cpu" else 640)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--image",
+        dest="media",
+        action=OrderedMediaAction,
+        metavar="PATH",
+        help="Local image; repeat for multiple images",
+    )
+    parser.add_argument(
+        "--video",
+        dest="media",
+        action=OrderedMediaAction,
+        metavar="PATH",
+        help="Local video; may be interleaved with --image",
+    )
+    parser.add_argument("--text-only", action="store_true", help="Do not use the default nuScenes image")
+    parser.add_argument("--prompt", default="Describe the scene completely and precisely.")
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=2048,
+        help="Thinking models need a large budget; truncation is reported explicitly",
+    )
+    parser.add_argument("--max-image-side", type=int, help="Resize each image before processing")
+    parser.add_argument("--seed", type=int, default=1234)
+    decoding = parser.add_mutually_exclusive_group()
+    decoding.add_argument(
+        "--sample",
+        dest="sample",
+        action="store_true",
+        default=True,
+        help="Use the Qwen Thinking sampling preset (default)",
+    )
+    decoding.add_argument(
+        "--greedy",
+        dest="sample",
+        action="store_false",
+        help="Use deterministic greedy decoding; some Thinking prompts may loop",
+    )
+    parser.add_argument("--temperature", type=float, default=0.6)
+    parser.add_argument("--top-p", type=float, default=0.95)
+    parser.add_argument("--top-k", type=int, default=20)
+    video_sampling = parser.add_mutually_exclusive_group()
+    video_sampling.add_argument("--video-fps", type=float, help="Sample this many video frames/second")
+    video_sampling.add_argument(
+        "--video-frames",
+        type=int,
+        default=32,
+        help="Maximum uniformly sampled video frames (default: 32)",
+    )
+    parser.add_argument("--require-eos", action="store_true", help="Exit nonzero if output hits the token cap")
+    parser.add_argument("--show-thinking", action="store_true")
+    parser.add_argument("--json", action="store_true", help="Print structured result JSON")
     parser.add_argument("--preflight-only", action="store_true", help="Validate local files/config only")
-    if device == "cpu":
-        parser.add_argument("--cpu-threads", type=int, default=min(os.cpu_count() or 1, 16))
-    else:
-        parser.add_argument("--kernel-dir", help="Local finegrained-fp8 Triton source directory")
+    parser.add_argument(
+        "--verify-sha",
+        action="store_true",
+        help="hash every checkpoint file against the pinned manifest before loading",
+    )
+    parser.add_argument(
+        "--yarn-1m",
+        action="store_true",
+        help="apply Qwen's official factor-3 Interleaved-MRoPE 1M context overlay",
+    )
+    parser.add_argument("--cpu-threads", type=int, default=min(os.cpu_count() or 1, 16))
+    parser.add_argument("--kernel-dir", help="Local finegrained-fp8 Triton source directory")
     return parser
 
 
-def main(device: str) -> int:
-    if device not in {"cpu", "cuda"}:
-        raise ValueError(f"unsupported device: {device}")
-    args = build_parser(device).parse_args()
-    if args.max_new_tokens < 1:
-        raise ValueError("--max-new-tokens must be positive")
-    if args.max_image_side < 1:
-        raise ValueError("--max-image-side must be positive")
+def main(device: str | None = None, argv: Sequence[str] | None = None) -> int:
+    args = build_parser(device).parse_args(argv)
+    selected_device = device or args.device
+    model_size = normalize_model_size(args.model_size)
+    if selected_device not in {"cpu", "cuda"}:
+        raise ValueError(f"unsupported device: {selected_device}")
+    max_image_side = args.max_image_side or (224 if selected_device == "cpu" else 640)
+    validate_generation_settings(
+        max_new_tokens=args.max_new_tokens,
+        max_image_side=max_image_side,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        top_k=args.top_k,
+        cpu_threads=args.cpu_threads,
+    )
+    if args.video_fps is not None and (
+        not math.isfinite(args.video_fps) or args.video_fps <= 0
+    ):
+        raise ValueError("--video-fps must be a finite positive number")
+    if args.video_frames is not None and args.video_frames <= 0:
+        raise ValueError("--video-frames must be positive")
 
     from huggingface_hub.constants import HF_HUB_OFFLINE
 
     if not HF_HUB_OFFLINE:
         raise RuntimeError("huggingface_hub was imported before HF_HUB_OFFLINE=1")
 
-    model_path = resolve_model_path(args.model_path, args.ckpt_dir)
-    checkpoint = validate_checkpoint(model_path)
-    config = load_patched_config(model_path, device)
-    print(
-        f"checkpoint OK: {model_path}\n"
-        f"  tensors={checkpoint['tensor_count']} scales={checkpoint['scale_count']} "
-        f"excluded_layers={checkpoint['skip_count']}\n"
-        "  network_guard=enabled, local_files_only=True"
-    )
+    model_path = resolve_model_path(args.model_path, args.ckpt_dir, model_size)
+    checkpoint = validate_checkpoint(model_path, model_size, full=args.verify_sha)
     if args.preflight_only:
+        if args.json:
+            print(json.dumps(checkpoint, ensure_ascii=False, indent=2))
+        else:
+            print(
+                f"checkpoint OK: {get_model_spec(model_size).repo_id} ({model_path})\n"
+                f"  tensors={checkpoint['tensor_count']} scales={checkpoint['scale_count']} "
+                f"excluded_layers={checkpoint['skip_count']}\n"
+                "  network_guard=enabled, local_files_only=True"
+            )
         return 0
 
-    if device == "cpu":
-        torch.set_num_threads(args.cpu_threads)
-        print(f"CPU mode: dequantized FP32 reference path, threads={torch.get_num_threads()}")
-    else:
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA is not available")
-        capability = torch.cuda.get_device_capability()
-        if capability < (8, 9):
-            raise RuntimeError(f"native fine-grained FP8 requires compute capability >= 8.9; got {capability}")
-        kernel_dir = resolve_local_kernel_dir(args.kernel_dir)
-        inject_local_fp8_kernel(kernel_dir)
-        print(
-            f"GPU mode: {torch.cuda.get_device_name(0)}, SM{capability[0]}{capability[1]}\n"
-            f"  local FP8 kernel={kernel_dir}"
+    output_redirect = contextlib.redirect_stdout(sys.stderr) if args.json else contextlib.nullcontext()
+    with output_redirect:
+        runtime = Qwen3VLRuntime(
+            model_size=model_size,
+            device=selected_device,
+            model_path=str(model_path),
+            ckpt_dir=args.ckpt_dir,
+            kernel_dir=args.kernel_dir,
+            cpu_threads=args.cpu_threads,
+            seed=args.seed,
+            verbose=not args.json,
+            verify_sha=False,  # already verified above
+            yarn_1m=args.yarn_1m,
         )
+        media_inputs = list(args.media or [])
+        if not media_inputs and not args.text_only:
+            media_inputs = [("image", str(DEFAULT_IMAGE))]
+        result, media = runtime.infer(
+            media_inputs=media_inputs,
+            prompt=args.prompt,
+            max_new_tokens=args.max_new_tokens,
+            max_image_side=max_image_side,
+            do_sample=args.sample,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            top_k=args.top_k,
+            video_fps=args.video_fps,
+            video_num_frames=(None if args.video_fps is not None else args.video_frames),
+        )
+    if args.json:
+        payload = {
+            "model": runtime.spec.repo_id,
+            "device_mode": "gpu_fp8" if selected_device == "cuda" else "cpu_fp32",
+            "compute_backend": runtime.compute_backend,
+            "context_mode": runtime.context_mode,
+            "media": [
+                {
+                    "kind": item.kind,
+                    "label": item.label,
+                    "original_size": item.original_size,
+                    "processed_size": item.processed_size,
+                }
+                for item in media
+            ],
+            "result": result.to_dict(),
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 2 if args.require_eos and result.finish_reason != "eos" else 0
 
-    torch.manual_seed(args.seed)
-    if device == "cuda":
-        torch.cuda.manual_seed_all(args.seed)
+    for item in media:
+        if item.kind == "image":
+            print(f"image OK: {item.label} {item.original_size} -> {item.processed_size}")
+        else:
+            print(f"video OK: {item.label}")
 
-    processor = AutoProcessor.from_pretrained(model_path, local_files_only=True)
-    model, fp8_names, dtype_counts = load_model(
-        model_path,
-        device,
-        config,
-        expected_scales=int(checkpoint["scale_count"]),
+    if args.show_thinking and result.reasoning:
+        print("\nMODEL THINKING\n" + result.reasoning)
+    print("\nMODEL OUTPUT\n" + result.answer)
+    print(
+        "\nGENERATION METRICS\n"
+        f"finish_reason={result.finish_reason} prompt_tokens={result.prompt_tokens} "
+        f"generated_tokens={result.generated_tokens} generation_s={result.generation_seconds:.3f} "
+        f"tokens_per_s={result.tokens_per_second:.3f}"
     )
-    print(f"model OK: fp8_modules={len(fp8_names)}, parameter_dtypes={dict(dtype_counts)}")
-
-    image, original_size = load_local_image(args.image, args.max_image_side)
-    print(f"image OK: {Path(args.image).expanduser().resolve()} {original_size} -> {image.size}")
-    text = generate(model, processor, image, args.prompt, device, args.max_new_tokens)
-    print("\nMODEL OUTPUT\n" + text)
+    if result.truncated:
+        print(
+            "WARNING: generation reached --max-new-tokens before EOS; increase the token budget.",
+            file=sys.stderr,
+        )
+    if args.require_eos and result.finish_reason != "eos":
+        return 2
     return 0
