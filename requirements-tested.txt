@@ -1,0 +1,7 @@
+# Exact userspace packages in the verified TensorRT-LLM 1.3.0rc20 container.
+# Torch is supplied by the NVIDIA image and is intentionally not reinstalled here.
+transformers==5.5.4
+accelerate==1.14.0
+kernels==0.14.1
+safetensors==0.8.0
+Pillow
