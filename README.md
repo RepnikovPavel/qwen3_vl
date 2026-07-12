@@ -27,6 +27,16 @@ QWEN3_PULL_BASE=1 ./docker/build.sh
 
 Результат: `qwen3-vl:trtllm-1.3.0rc20`. NVIDIA PyTorch, CUDA и Triton не переустанавливаются.
 
+## Demo
+
+```bash
+mkdir -p "$HOME/qwen3-vl-demo-state"
+./docker/run_demo.sh "$MODELS" "$HOME/qwen3-vl-demo-state" 8001
+ssh -N -L 8001:127.0.0.1:8001 USER@SERVER
+```
+
+Открыть `http://127.0.0.1:8001`. Только FP8 CUDA; `single` использует одну видимую GPU, `balanced` распределяет модель по нескольким. Сессии и media лежат в state-каталоге.
+
 ## GPU FP8 inference
 
 ```bash

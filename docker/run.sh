@@ -17,11 +17,13 @@ Modes:
   eval-gpu       GPU-FP8 synthetic OCR/formula/chart evaluation
   eval-cpu       CPU-FP32 synthetic OCR/formula/chart evaluation
   sweep          GPU-FP8 context sweep with network disabled
-  web            Web UI on host 127.0.0.1:PORT
+  web            Legacy Web UI on host 127.0.0.1:PORT
+  demo           Persistent FP8 demo on host 127.0.0.1:PORT
 
 Environment:
   QWEN3_IMAGE     Container image (default qwen3-vl:trtllm-1.3.0rc20)
   QWEN3_GPUS      Docker --gpus value (default all)
+  QWEN3_STATE     Persistent demo state directory (required for demo)
 
 Arguments after -- are passed unchanged to the selected Python program.
 EOF
@@ -90,13 +92,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${mode}" in
-    download|infer-gpu|infer-cpu|benchmark|benchmark-cpu|parity|parity-cpu|eval-gpu|eval-cpu|sweep|web) ;;
+    download|infer-gpu|infer-cpu|benchmark|benchmark-cpu|parity|parity-cpu|eval-gpu|eval-cpu|sweep|web|demo) ;;
     *) usage >&2; die "unknown mode: ${mode}" ;;
 esac
 
 [[ -n "${models_dir}" ]] || die "--models is required"
 models_dir="$(canonical_dir "${models_dir}")"
-if [[ "${mode}" != "download" ]]; then
+if [[ "${mode}" != "download" && "${mode}" != "demo" ]]; then
     [[ -n "${data_dir}" ]] || die "--data is required for ${mode}"
     data_dir="$(canonical_dir "${data_dir}")"
 fi
@@ -295,6 +297,25 @@ case "${mode}" in
             --host 0.0.0.0
             --port 7860
         )
+        ;;
+    demo)
+        state_dir="${QWEN3_STATE:-}"
+        [[ -n "${state_dir}" ]] || die "QWEN3_STATE is required for demo"
+        state_dir="$(canonical_dir "${state_dir}")"
+        docker_args+=(
+            --network=bridge
+            --gpus "${gpu_request}"
+            --publish "127.0.0.1:${host_port}:7860/tcp"
+            --env CKPTDIR=/models
+            --env DEMO_STATE_DIR=/state
+            --env PORT=7860
+            --env QWEN3_WEB_PORT=7860
+            --env PYTORCH_ALLOC_CONF=expandable_segments:True
+            --mount "type=bind,src=${models_dir},dst=/models,readonly"
+            --mount "type=bind,src=${state_dir},dst=/state"
+            "${offline_env[@]}"
+        )
+        container_command=(python3 -m demo.server)
         ;;
 esac
 

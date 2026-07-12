@@ -50,24 +50,18 @@ GPU inference and benchmarks have no container network:
 
 Use `infer-cpu` or `benchmark-cpu` for the dequantized CPU-FP32 comparison.
 
-## Web UI and SSH tunnel
-
-The Web UI is published only on the host loopback interface:
+## Persistent FP8 demo
 
 ```bash
-./docker/run.sh web \
-  --models "$HOME/qwen3-models" \
-  --data "$HOME/qwen3-data" \
-  --port 7860 -- --model 2b
+mkdir -p "$HOME/qwen3-vl-demo-state"
+./docker/run_demo.sh "$HOME/qwen3-models" "$HOME/qwen3-vl-demo-state" 8001
 ```
-
-For a remote machine, forward that loopback port over SSH from the client:
 
 ```bash
-ssh -N -L 7860:127.0.0.1:7860 -p SSH_PORT USER@HOST
+ssh -N -L 8001:127.0.0.1:8001 -p SSH_PORT USER@HOST
 ```
 
-Then open `http://127.0.0.1:7860`.  The run wrapper does not use host
+Open `http://127.0.0.1:8001`. The run wrapper does not use host
 networking, privileged mode, X11, blanket filesystem mounts, or credential
 environment variables.  Do not put access tokens or passwords in image build
 arguments or command-line options.
