@@ -7,6 +7,7 @@ import math
 import re
 import sys
 import unicodedata
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -132,9 +133,11 @@ def _validate_formula_object(
     if require_nonempty and not formulas:
         raise SchemaError(f"{path}.formulas must not be empty")
     for index, formula in enumerate(formulas):
-        _require_string(
+        validated = _require_string(
             formula, f"{path}.formulas[{index}]", allow_empty=not require_nonempty
         )
+        if any(ord(character) < 32 for character in validated):
+            raise SchemaError(f"{path}.formulas[{index}] contains a control character")
     return formula_object
 
 
@@ -484,20 +487,117 @@ def _evaluate_chart(
     }
 
 
+def _validate_structured_answer(value: Any, task: str) -> dict[str, Any]:
+    if task == "formula":
+        return _validate_formula_object(value, "answer", False)
+    return _validate_chart_object(value, "answer", False)
+
+
+def _escape_formula_json_backslashes(answer: str) -> str | None:
+    output: list[str] = []
+    index = 0
+    in_string = False
+    changed = False
+    while index < len(answer):
+        character = answer[index]
+        if not in_string:
+            output.append(character)
+            if character == '"':
+                in_string = True
+            index += 1
+            continue
+        if character == '"':
+            output.append(character)
+            in_string = False
+            index += 1
+            continue
+        if character != "\\":
+            output.append(character)
+            index += 1
+            continue
+        if index + 1 >= len(answer):
+            return None
+        following = answer[index + 1]
+        if following in {'"', "\\", "/"}:
+            output.extend((character, following))
+            index += 2
+            continue
+        if (
+            following == "u"
+            and index + 6 <= len(answer)
+            and re.fullmatch(r"[0-9a-fA-F]{4}", answer[index + 2 : index + 6])
+        ):
+            output.append(answer[index : index + 6])
+            index += 6
+            continue
+        output.append("\\\\")
+        index += 1
+        changed = True
+    return "".join(output) if changed else None
+
+
+def _alias_chart_numeric_values(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    recovered = deepcopy(value)
+    panels = recovered.get("panels")
+    if not isinstance(panels, list):
+        return None
+    changed = False
+    for panel in panels:
+        if not isinstance(panel, dict) or not isinstance(panel.get("series"), list):
+            continue
+        for series in panel["series"]:
+            if not isinstance(series, dict) or "numeric_values" not in series:
+                continue
+            if "values" in series:
+                return None
+            series["values"] = series.pop("numeric_values")
+            changed = True
+    return recovered if changed else None
+
+
 def _structured_answer(
     answer: str, task: str
-) -> tuple[dict[str, Any] | None, str | None]:
+) -> tuple[dict[str, Any] | None, str | None, list[str]]:
     try:
         parsed = _loads_json(answer, f"{task} answer")
-        if task == "formula":
-            return _validate_formula_object(parsed, "answer", False), None
-        return _validate_chart_object(parsed, "answer", False), None
+        return _validate_structured_answer(parsed, task), None, []
     except SchemaError as exc:
-        return None, str(exc)
+        strict_error = str(exc)
+    if task == "formula":
+        recovered_text = _escape_formula_json_backslashes(answer)
+        if recovered_text is not None:
+            try:
+                recovered = _loads_json(recovered_text, "recovered formula answer")
+                return (
+                    _validate_structured_answer(recovered, task),
+                    strict_error,
+                    ["escape_latex_backslashes"],
+                )
+            except SchemaError:
+                pass
+    if task == "chart":
+        try:
+            parsed = _loads_json(answer, "chart answer recovery")
+        except SchemaError:
+            parsed = None
+        recovered = _alias_chart_numeric_values(parsed)
+        if recovered is not None:
+            try:
+                return (
+                    _validate_structured_answer(recovered, task),
+                    strict_error,
+                    ["alias_numeric_values_to_values"],
+                )
+            except SchemaError:
+                pass
+    return None, strict_error, []
 
 
 def _summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     schema_valid_count = sum(result["response_schema_valid"] for result in results)
+    recovery_count = sum(result["response_recovery_applied"] for result in results)
     text_result = next(result for result in results if result["task"] == "text")
     formula_result = next(result for result in results if result["task"] == "formula")
     chart_results = [result for result in results if result["task"] == "chart"]
@@ -528,6 +628,8 @@ def _summary(results: list[dict[str, Any]]) -> dict[str, Any]:
         "fixture_count": len(results),
         "response_schema_valid_count": schema_valid_count,
         "response_schema_valid_rate": schema_valid_count / len(results),
+        "response_recovery_applied_count": recovery_count,
+        "response_recovery_applied_rate": recovery_count / len(results),
         "text": {
             "nfkc_exact": text_result["metrics"]["nfkc_exact"],
             "cer": text_result["metrics"]["cer"],
@@ -571,17 +673,18 @@ def evaluate(manifest_path: str | Path, responses_path: str | Path) -> dict[str,
         answer = answers[fixture["id"]]
         task = fixture["task"]
         schema_error = None
+        recovery_steps: list[str] = []
         if task == "text":
             schema_valid = True
             metrics = _evaluate_text(fixture["ground_truth"]["text"], answer)
         elif task == "formula":
-            structured, schema_error = _structured_answer(answer, task)
-            schema_valid = structured is not None
+            structured, schema_error, recovery_steps = _structured_answer(answer, task)
+            schema_valid = schema_error is None
             predicted = structured["formulas"] if structured is not None else []
             metrics = _evaluate_formula(fixture["ground_truth"]["formulas"], predicted)
         else:
-            structured, schema_error = _structured_answer(answer, task)
-            schema_valid = structured is not None
+            structured, schema_error, recovery_steps = _structured_answer(answer, task)
+            schema_valid = schema_error is None
             metrics = _evaluate_chart(fixture["ground_truth"], structured)
         results.append(
             {
@@ -589,6 +692,8 @@ def evaluate(manifest_path: str | Path, responses_path: str | Path) -> dict[str,
                 "task": task,
                 "response_schema_valid": schema_valid,
                 "response_schema_error": schema_error,
+                "response_recovery_applied": bool(recovery_steps),
+                "response_recovery_steps": recovery_steps,
                 "metrics": metrics,
             }
         )

@@ -80,6 +80,13 @@ class EvaluationTest(unittest.TestCase):
             result = evaluate(manifest_path, responses_path)
 
         self.assertEqual(result["summary"]["response_schema_valid_rate"], 1.0)
+        self.assertEqual(result["summary"]["response_recovery_applied_count"], 0)
+        self.assertTrue(
+            all(not entry["response_recovery_applied"] for entry in result["results"])
+        )
+        self.assertTrue(
+            all(entry["response_recovery_steps"] == [] for entry in result["results"])
+        )
         self.assertTrue(result["summary"]["text"]["nfkc_exact"])
         self.assertEqual(result["summary"]["text"]["cer"], 0.0)
         self.assertEqual(result["summary"]["text"]["wer"], 0.0)
@@ -126,10 +133,96 @@ class EvaluationTest(unittest.TestCase):
         )
         self.assertLess(results["line_bar_chart"]["metrics"]["fact_recall"], 1)
         self.assertFalse(results["scatter_heatmap_chart"]["response_schema_valid"])
+        self.assertFalse(results["scatter_heatmap_chart"]["response_recovery_applied"])
+        self.assertEqual(
+            results["scatter_heatmap_chart"]["metrics"]["label_exact_rate"], 0
+        )
+        self.assertEqual(
+            results["scatter_heatmap_chart"]["metrics"][
+                "numeric_within_tolerance_rate"
+            ],
+            0,
+        )
         self.assertIn(
             "invalid JSON", results["scatter_heatmap_chart"]["response_schema_error"]
         )
         self.assertEqual(result["summary"]["response_schema_valid_count"], 3)
+
+    def test_narrow_formula_and_numeric_values_recovery_preserves_strict_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            _, manifest_path, manifest, responses_path = self._workspace(temporary)
+            responses = _perfect_responses(manifest)
+            by_id = {entry["id"]: entry for entry in responses["responses"]}
+            formula_answer = json.dumps(
+                manifest["fixtures"][1]["ground_truth"], ensure_ascii=False
+            ).replace("\\\\", "\\")
+            by_id["formulas_mathtext"]["answer"] = formula_answer
+            line_chart = _chart_answer(
+                deepcopy(manifest["fixtures"][2]["ground_truth"])
+            )
+            for panel in line_chart["panels"]:
+                for series in panel["series"]:
+                    series["numeric_values"] = series.pop("values")
+            by_id["line_bar_chart"]["answer"] = json.dumps(line_chart)
+            responses_path.write_text(json.dumps(responses), encoding="utf-8")
+
+            result = evaluate(manifest_path, responses_path)
+
+        results = {entry["id"]: entry for entry in result["results"]}
+        formula_result = results["formulas_mathtext"]
+        self.assertFalse(formula_result["response_schema_valid"])
+        self.assertIsNotNone(formula_result["response_schema_error"])
+        self.assertTrue(formula_result["response_recovery_applied"])
+        self.assertEqual(
+            formula_result["response_recovery_steps"],
+            ["escape_latex_backslashes"],
+        )
+        self.assertEqual(formula_result["metrics"]["normalized_exact_rate"], 1)
+        self.assertEqual(formula_result["metrics"]["syntax_valid_rate"], 1)
+        chart_result = results["line_bar_chart"]
+        self.assertFalse(chart_result["response_schema_valid"])
+        self.assertIn("numeric_values", chart_result["response_schema_error"])
+        self.assertTrue(chart_result["response_recovery_applied"])
+        self.assertEqual(
+            chart_result["response_recovery_steps"],
+            ["alias_numeric_values_to_values"],
+        )
+        self.assertEqual(chart_result["metrics"]["label_exact_rate"], 1)
+        self.assertEqual(chart_result["metrics"]["numeric_within_tolerance_rate"], 1)
+        self.assertEqual(result["summary"]["response_schema_valid_count"], 2)
+        self.assertEqual(result["summary"]["response_recovery_applied_count"], 2)
+
+    def test_recovery_rejects_markdown_and_ambiguous_numeric_alias(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            _, manifest_path, manifest, responses_path = self._workspace(temporary)
+            responses = _perfect_responses(manifest)
+            by_id = {entry["id"]: entry for entry in responses["responses"]}
+            by_id["formulas_mathtext"]["answer"] = (
+                '```json\n{"formulas":["\\int_0^1 x\\,dx"]}\n```'
+            )
+            line_chart = _chart_answer(
+                deepcopy(manifest["fixtures"][2]["ground_truth"])
+            )
+            line_chart["panels"][0]["series"][0]["numeric_values"] = line_chart[
+                "panels"
+            ][0]["series"][0]["values"]
+            by_id["line_bar_chart"]["answer"] = json.dumps(line_chart)
+            responses_path.write_text(json.dumps(responses), encoding="utf-8")
+
+            result = evaluate(manifest_path, responses_path)
+
+        results = {entry["id"]: entry for entry in result["results"]}
+        for fixture_id in ("formulas_mathtext", "line_bar_chart"):
+            self.assertFalse(results[fixture_id]["response_schema_valid"])
+            self.assertFalse(results[fixture_id]["response_recovery_applied"])
+            self.assertEqual(results[fixture_id]["response_recovery_steps"], [])
+        self.assertEqual(
+            results["formulas_mathtext"]["metrics"]["normalized_exact_rate"], 0
+        )
+        self.assertEqual(
+            results["line_bar_chart"]["metrics"]["numeric_within_tolerance_rate"],
+            0,
+        )
 
     def test_wrapper_and_manifest_validation_are_strict(self):
         with tempfile.TemporaryDirectory() as temporary:
