@@ -1,0 +1,2826 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Qwen3 VL FP8 Studio</title>
+  <style>
+    :root {
+      --bg: #080a0f;
+      --bg-soft: #0d1017;
+      --panel: #11151d;
+      --panel-2: #171c26;
+      --panel-3: #1d2330;
+      --line: #272e3b;
+      --line-strong: #353e50;
+      --text: #f2f4f8;
+      --muted: #939dad;
+      --dim: #677184;
+      --accent: #8b7cf6;
+      --accent-2: #4fd1c5;
+      --accent-soft: rgba(139, 124, 246, .14);
+      --good: #4ed39a;
+      --warn: #f5bd63;
+      --bad: #ff747f;
+      --shadow: 0 18px 55px rgba(0, 0, 0, .32);
+      --radius: 16px;
+      --radius-sm: 10px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 76% -20%, rgba(98, 80, 220, .16), transparent 35%),
+        radial-gradient(circle at 8% 110%, rgba(41, 178, 166, .08), transparent 30%),
+        var(--bg);
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      color: inherit;
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+    }
+
+    button,
+    select,
+    input[type="checkbox"],
+    summary {
+      cursor: pointer;
+    }
+
+    button:disabled,
+    select:disabled,
+    input:disabled,
+    textarea:disabled {
+      cursor: not-allowed;
+      opacity: .5;
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--accent-2);
+      outline-offset: 2px;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      height: 100%;
+    }
+
+    .sidebar {
+      position: relative;
+      z-index: 20;
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      border-right: 1px solid var(--line);
+      background: rgba(11, 14, 20, .94);
+      backdrop-filter: blur(18px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 21px 20px 17px;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 35px;
+      height: 35px;
+      place-items: center;
+      border: 1px solid rgba(139, 124, 246, .45);
+      border-radius: 11px;
+      color: #dcd7ff;
+      background: linear-gradient(145deg, rgba(139, 124, 246, .28), rgba(79, 209, 197, .1));
+      box-shadow: inset 0 1px rgba(255, 255, 255, .1);
+      font-weight: 800;
+      letter-spacing: -.04em;
+    }
+
+    .brand-copy {
+      min-width: 0;
+    }
+
+    .brand-title {
+      font-size: 14px;
+      font-weight: 750;
+      letter-spacing: .01em;
+    }
+
+    .brand-subtitle {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .sidebar-tools {
+      padding: 0 14px 13px;
+    }
+
+    .new-chat {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 42px;
+      border: 1px solid rgba(139, 124, 246, .38);
+      border-radius: 11px;
+      color: #f0edff;
+      background: linear-gradient(135deg, rgba(139, 124, 246, .22), rgba(94, 79, 202, .1));
+      font-weight: 700;
+      transition: border-color .18s ease, background .18s ease, transform .18s ease;
+    }
+
+    .new-chat:hover {
+      border-color: rgba(139, 124, 246, .72);
+      background: linear-gradient(135deg, rgba(139, 124, 246, .32), rgba(94, 79, 202, .15));
+      transform: translateY(-1px);
+    }
+
+    .session-search {
+      width: 100%;
+      height: 38px;
+      margin-top: 10px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--text);
+      background: #0d1118;
+      outline: 0;
+    }
+
+    .session-search::placeholder,
+    textarea::placeholder {
+      color: #687284;
+    }
+
+    .session-search:focus {
+      border-color: var(--line-strong);
+      box-shadow: 0 0 0 3px rgba(139, 124, 246, .09);
+    }
+
+    .sidebar-label {
+      padding: 4px 20px 8px;
+      color: var(--dim);
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .sessions {
+      flex: 1;
+      overflow: auto;
+      padding: 0 9px 14px;
+      scrollbar-width: thin;
+      scrollbar-color: #303747 transparent;
+    }
+
+    .session-row {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      margin: 2px 0;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      transition: background .16s ease, border-color .16s ease;
+    }
+
+    .session-row:hover {
+      background: rgba(255, 255, 255, .035);
+    }
+
+    .session-row.active {
+      border-color: rgba(139, 124, 246, .26);
+      background: var(--accent-soft);
+    }
+
+    .session-main {
+      min-width: 0;
+      padding: 10px 8px 10px 11px;
+      text-align: left;
+      background: transparent;
+    }
+
+    .session-title {
+      overflow: hidden;
+      font-size: 13px;
+      font-weight: 580;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .session-meta {
+      overflow: hidden;
+      margin-top: 4px;
+      color: var(--dim);
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .session-actions {
+      display: flex;
+      padding-right: 5px;
+      opacity: 0;
+      transition: opacity .16s ease;
+    }
+
+    .session-row:hover .session-actions,
+    .session-row:focus-within .session-actions,
+    .session-row.active .session-actions {
+      opacity: 1;
+    }
+
+    .icon-button {
+      display: inline-grid;
+      width: 31px;
+      height: 31px;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      color: var(--muted);
+      background: transparent;
+      transition: color .15s ease, background .15s ease, border-color .15s ease;
+    }
+
+    .icon-button:hover {
+      border-color: var(--line);
+      color: var(--text);
+      background: var(--panel-2);
+    }
+
+    .icon-button.danger:hover {
+      color: var(--bad);
+    }
+
+    .empty-sessions {
+      padding: 28px 18px;
+      color: var(--dim);
+      font-size: 12px;
+      line-height: 1.55;
+      text-align: center;
+    }
+
+    .sidebar-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .connection {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: var(--dim);
+      box-shadow: 0 0 0 3px rgba(103, 113, 132, .12);
+    }
+
+    .status-dot.good {
+      background: var(--good);
+      box-shadow: 0 0 0 3px rgba(78, 211, 154, .12), 0 0 12px rgba(78, 211, 154, .3);
+    }
+
+    .status-dot.busy {
+      background: var(--warn);
+      box-shadow: 0 0 0 3px rgba(245, 189, 99, .12), 0 0 12px rgba(245, 189, 99, .26);
+    }
+
+    .main {
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    .topbar {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      min-width: 0;
+      align-items: end;
+      gap: 10px;
+      padding: 11px 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(9, 12, 17, .84);
+      backdrop-filter: blur(16px);
+    }
+
+    .mobile-menu {
+      display: none;
+      flex: 0 0 auto;
+      margin-bottom: 1px;
+    }
+
+    .control {
+      display: grid;
+      min-width: 0;
+      gap: 5px;
+    }
+
+    .control.model-control {
+      width: min(320px, 31vw);
+    }
+
+    .control.placement-control {
+      width: 126px;
+    }
+
+    .control label,
+    .field-label {
+      color: var(--dim);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+
+    select,
+    .number-input,
+    .text-input {
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--text);
+      background: var(--panel);
+      outline: 0;
+    }
+
+    select {
+      width: 100%;
+      padding: 0 29px 0 10px;
+    }
+
+    select:focus,
+    .number-input:focus,
+    .text-input:focus,
+    textarea:focus {
+      border-color: rgba(139, 124, 246, .75);
+      box-shadow: 0 0 0 3px rgba(139, 124, 246, .1);
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-left: 2px;
+    }
+
+    .button {
+      display: inline-flex;
+      min-height: 36px;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: #dfe3ea;
+      background: var(--panel);
+      font-size: 12px;
+      font-weight: 700;
+      transition: color .15s ease, background .15s ease, border-color .15s ease, transform .15s ease;
+    }
+
+    .button:hover:not(:disabled) {
+      border-color: var(--line-strong);
+      color: #fff;
+      background: var(--panel-2);
+      transform: translateY(-1px);
+    }
+
+    .button.primary {
+      border-color: rgba(139, 124, 246, .55);
+      color: #fff;
+      background: linear-gradient(135deg, #7665e9, #5e51c8);
+      box-shadow: 0 8px 23px rgba(93, 77, 203, .2);
+    }
+
+    .button.primary:hover:not(:disabled) {
+      border-color: #9d91fa;
+      background: linear-gradient(135deg, #8373f2, #695bd5);
+    }
+
+    .button.danger {
+      color: #ffb3b9;
+    }
+
+    .top-spacer {
+      flex: 1;
+      min-width: 4px;
+    }
+
+    .resource-wrap {
+      position: relative;
+    }
+
+    .resource-button {
+      white-space: nowrap;
+    }
+
+    .resource-panel {
+      position: absolute;
+      top: calc(100% + 9px);
+      right: 0;
+      display: none;
+      width: min(360px, calc(100vw - 28px));
+      padding: 14px;
+      border: 1px solid var(--line-strong);
+      border-radius: 13px;
+      background: rgba(17, 21, 29, .98);
+      box-shadow: var(--shadow);
+    }
+
+    .resource-panel.open {
+      display: block;
+    }
+
+    .resource-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .resource-title {
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .rss-value {
+      color: var(--accent-2);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .gpu-row + .gpu-row {
+      margin-top: 13px;
+    }
+
+    .gpu-labels {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 6px;
+      font-size: 11px;
+    }
+
+    .gpu-name {
+      overflow: hidden;
+      color: #dce1e9;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .gpu-value {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bar {
+      overflow: hidden;
+      height: 6px;
+      border-radius: 999px;
+      background: #262c37;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width .3s ease;
+    }
+
+    .resource-empty {
+      padding: 11px 0;
+      color: var(--dim);
+      font-size: 11px;
+      text-align: center;
+    }
+
+    .workspace {
+      position: relative;
+      display: grid;
+      min-height: 0;
+      grid-template-rows: minmax(0, 1fr) auto;
+    }
+
+    .scroll-region {
+      min-height: 0;
+      overflow: auto;
+      scroll-behavior: smooth;
+      scrollbar-width: thin;
+      scrollbar-color: #303747 transparent;
+    }
+
+    .conversation-shell {
+      width: min(1180px, calc(100% - 40px));
+      min-height: 100%;
+      margin: 0 auto;
+      padding: 32px 0 38px;
+    }
+
+    .hero {
+      display: grid;
+      min-height: min(560px, calc(100vh - 280px));
+      place-items: center;
+    }
+
+    .hero-inner {
+      width: min(700px, 100%);
+      text-align: center;
+    }
+
+    .hero-orb {
+      display: grid;
+      width: 66px;
+      height: 66px;
+      margin: 0 auto 20px;
+      place-items: center;
+      border: 1px solid rgba(139, 124, 246, .42);
+      border-radius: 22px;
+      color: #e4e0ff;
+      background:
+        radial-gradient(circle at 30% 20%, rgba(255, 255, 255, .18), transparent 28%),
+        linear-gradient(145deg, rgba(139, 124, 246, .38), rgba(79, 209, 197, .12));
+      box-shadow: 0 18px 55px rgba(86, 70, 196, .23), inset 0 1px rgba(255, 255, 255, .14);
+      font-size: 20px;
+      font-weight: 850;
+      letter-spacing: -.06em;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(26px, 4vw, 42px);
+      letter-spacing: -.045em;
+      line-height: 1.08;
+    }
+
+    .hero p {
+      max-width: 590px;
+      margin: 14px auto 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .hero-pills {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 25px;
+    }
+
+    .hero-pill {
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: #abb3c1;
+      background: rgba(17, 21, 29, .74);
+      font-size: 11px;
+    }
+
+    .message {
+      margin-bottom: 24px;
+    }
+
+    .message-head {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 9px;
+    }
+
+    .avatar {
+      display: grid;
+      width: 27px;
+      height: 27px;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--muted);
+      background: var(--panel);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .message.assistant .avatar {
+      border-color: rgba(139, 124, 246, .35);
+      color: #dcd6ff;
+      background: var(--accent-soft);
+    }
+
+    .message-author {
+      color: #dce1e9;
+      font-size: 12px;
+      font-weight: 740;
+    }
+
+    .message-time {
+      color: var(--dim);
+      font-size: 10px;
+    }
+
+    .message-body {
+      margin-left: 36px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      color: #e6e9ee;
+      font-size: 14px;
+      line-height: 1.68;
+    }
+
+    .message.user .message-body {
+      display: inline-block;
+      max-width: min(760px, calc(100% - 36px));
+      padding: 11px 14px;
+      border: 1px solid var(--line);
+      border-radius: 4px 14px 14px 14px;
+      background: var(--panel);
+    }
+
+    .message-media {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 220px));
+      gap: 10px;
+      margin: 12px 0 0 36px;
+    }
+
+    .message-media figure {
+      overflow: hidden;
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #07090d;
+    }
+
+    .message-media img,
+    .message-media video {
+      display: block;
+      width: 100%;
+      height: 150px;
+      object-fit: contain;
+      background: #05070a;
+    }
+
+    .message-media figcaption {
+      overflow: hidden;
+      padding: 7px 9px;
+      color: var(--muted);
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .assistant-grid,
+    .generation-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.08fr) minmax(300px, .92fr);
+      gap: 12px;
+      margin-left: 36px;
+    }
+
+    .response-pane {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(17, 21, 29, .74);
+    }
+
+    .response-pane.thinking-pane {
+      background: rgba(13, 16, 23, .76);
+    }
+
+    .pane-head {
+      display: flex;
+      min-height: 39px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .pane-actions {
+      display: flex;
+      gap: 3px;
+    }
+
+    .pane-action {
+      display: grid;
+      width: 27px;
+      height: 27px;
+      place-items: center;
+      border-radius: 7px;
+      color: var(--dim);
+      background: transparent;
+      font-size: 13px;
+    }
+
+    .pane-action:hover {
+      color: var(--text);
+      background: var(--panel-3);
+    }
+
+    .pane-content {
+      min-height: 110px;
+      max-height: 540px;
+      overflow: auto;
+      padding: 14px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      color: #e8ebf0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.65;
+      scrollbar-width: thin;
+      scrollbar-color: #303747 transparent;
+    }
+
+    .thinking-pane .pane-content {
+      color: #a9b1c0;
+    }
+
+    .pane-placeholder {
+      color: var(--dim);
+      font-family: inherit;
+      font-style: italic;
+    }
+
+    .message-metrics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 9px 0 0 36px;
+    }
+
+    .metric-chip {
+      padding: 5px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(13, 16, 23, .75);
+      font-size: 9px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .generation-card {
+      margin: 4px 0 28px;
+    }
+
+    .generation-top {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 10px;
+    }
+
+    .pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      box-shadow: 0 0 0 0 rgba(79, 209, 197, .4);
+      animation: pulse 1.6s ease-out infinite;
+    }
+
+    .generation-card.done .pulse {
+      animation: none;
+      background: var(--good);
+      box-shadow: 0 0 0 3px rgba(78, 211, 154, .1);
+    }
+
+    .generation-card.failed .pulse {
+      animation: none;
+      background: var(--bad);
+    }
+
+    @keyframes pulse {
+      70% { box-shadow: 0 0 0 7px rgba(79, 209, 197, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(79, 209, 197, 0); }
+    }
+
+    .generation-label {
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .generation-stage {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .live-metrics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin: 0 0 11px 36px;
+    }
+
+    .live-metric {
+      min-width: 82px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(17, 21, 29, .7);
+    }
+
+    .live-metric-label {
+      color: var(--dim);
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+
+    .live-metric-value {
+      margin-top: 3px;
+      color: #dfe4eb;
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .structured {
+      margin: 12px 0 0 36px;
+      overflow: hidden;
+      border: 1px solid rgba(79, 209, 197, .25);
+      border-radius: 13px;
+      background: rgba(11, 24, 25, .43);
+    }
+
+    .structured[hidden] {
+      display: none;
+    }
+
+    .structured .pane-content {
+      min-height: 60px;
+      max-height: 380px;
+      color: #bce8e3;
+    }
+
+    .composer-wrap {
+      position: relative;
+      z-index: 8;
+      padding: 0 18px 17px;
+      background: linear-gradient(180deg, transparent, rgba(8, 10, 15, .95) 22%, var(--bg) 46%);
+    }
+
+    .composer {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 17px;
+      background: rgba(17, 21, 29, .96);
+      box-shadow: 0 16px 45px rgba(0, 0, 0, .3), inset 0 1px rgba(255, 255, 255, .025);
+    }
+
+    .dropzone {
+      display: none;
+      margin: 12px 12px 0;
+      padding: 15px;
+      border: 1px dashed #3a4354;
+      border-radius: 12px;
+      color: var(--muted);
+      background: rgba(9, 12, 17, .65);
+      font-size: 12px;
+      text-align: center;
+      transition: border-color .16s ease, color .16s ease, background .16s ease;
+    }
+
+    .dropzone.visible {
+      display: block;
+    }
+
+    .dropzone.dragging {
+      border-color: var(--accent-2);
+      color: #cef8f3;
+      background: rgba(79, 209, 197, .08);
+    }
+
+    .file-previews {
+      display: flex;
+      gap: 9px;
+      overflow-x: auto;
+      padding: 11px 12px 0;
+      scrollbar-width: thin;
+      scrollbar-color: #303747 transparent;
+    }
+
+    .file-previews:empty {
+      display: none;
+    }
+
+    .file-preview {
+      position: relative;
+      width: 118px;
+      flex: 0 0 118px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #090c11;
+    }
+
+    .file-preview img,
+    .file-preview video {
+      display: block;
+      width: 100%;
+      height: 73px;
+      object-fit: contain;
+      background: #05070a;
+    }
+
+    .file-preview-name {
+      overflow: hidden;
+      padding: 6px 7px 1px;
+      color: #cbd1da;
+      font-size: 9px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .file-preview-size {
+      padding: 1px 7px 6px;
+      color: var(--dim);
+      font-size: 8px;
+    }
+
+    .file-remove {
+      position: absolute;
+      top: 5px;
+      right: 5px;
+      display: grid;
+      width: 23px;
+      height: 23px;
+      place-items: center;
+      border: 1px solid rgba(255, 255, 255, .12);
+      border-radius: 7px;
+      color: #fff;
+      background: rgba(6, 8, 12, .82);
+      backdrop-filter: blur(5px);
+    }
+
+    .task-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      overflow-x: auto;
+      padding: 11px 12px 8px;
+      scrollbar-width: none;
+    }
+
+    .task-row::-webkit-scrollbar {
+      display: none;
+    }
+
+    .task-chip {
+      min-height: 29px;
+      flex: 0 0 auto;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 10px;
+      font-weight: 700;
+      transition: color .15s ease, border-color .15s ease, background .15s ease;
+    }
+
+    .task-chip:hover {
+      border-color: var(--line-strong);
+      color: var(--text);
+    }
+
+    .task-chip.active {
+      border-color: rgba(139, 124, 246, .52);
+      color: #e5e0ff;
+      background: var(--accent-soft);
+    }
+
+    .custom-prompt {
+      display: none;
+      width: calc(100% - 24px);
+      min-height: 72px;
+      max-height: 180px;
+      margin: 0 12px 8px;
+      padding: 11px 12px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--text);
+      background: #0d1118;
+      outline: 0;
+      line-height: 1.5;
+    }
+
+    .custom-prompt.visible {
+      display: block;
+    }
+
+    .composer-main {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px 10px;
+    }
+
+    .attach-button {
+      flex: 0 0 auto;
+    }
+
+    .composer-hint {
+      min-width: 0;
+      flex: 1;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .composer-hint strong {
+      color: #dbe0e8;
+      font-weight: 700;
+    }
+
+    .send-button {
+      min-width: 82px;
+      flex: 0 0 auto;
+    }
+
+    .stop-button {
+      border-color: rgba(255, 116, 127, .42);
+      color: #ffd5d8;
+      background: rgba(117, 38, 46, .35);
+    }
+
+    .advanced {
+      border-top: 1px solid var(--line);
+    }
+
+    .advanced summary {
+      display: flex;
+      min-height: 35px;
+      align-items: center;
+      gap: 7px;
+      padding: 0 13px;
+      color: var(--muted);
+      font-size: 10px;
+      list-style: none;
+      user-select: none;
+    }
+
+    .advanced summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .advanced summary::before {
+      content: "›";
+      color: var(--dim);
+      font-size: 15px;
+      transform: rotate(0deg);
+      transition: transform .15s ease;
+    }
+
+    .advanced[open] summary::before {
+      transform: rotate(90deg);
+    }
+
+    .advanced-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(100px, 1fr));
+      gap: 9px;
+      padding: 3px 12px 12px;
+    }
+
+    .advanced-field {
+      display: grid;
+      min-width: 0;
+      gap: 5px;
+    }
+
+    .number-input {
+      width: 100%;
+      padding: 0 9px;
+    }
+
+    .toggle-field {
+      display: flex;
+      min-height: 36px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--muted);
+      background: var(--panel);
+      font-size: 11px;
+    }
+
+    .toggle-field input {
+      width: 15px;
+      height: 15px;
+      accent-color: var(--accent);
+    }
+
+    .backdrop {
+      position: fixed;
+      z-index: 15;
+      inset: 0;
+      display: none;
+      background: rgba(0, 0, 0, .56);
+      backdrop-filter: blur(3px);
+    }
+
+    .backdrop.visible {
+      display: block;
+    }
+
+    .toasts {
+      position: fixed;
+      z-index: 50;
+      top: 14px;
+      right: 14px;
+      display: grid;
+      width: min(360px, calc(100vw - 28px));
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .toast {
+      padding: 11px 13px;
+      border: 1px solid var(--line-strong);
+      border-radius: 11px;
+      color: #e5e8ed;
+      background: rgba(24, 29, 39, .97);
+      box-shadow: var(--shadow);
+      font-size: 12px;
+      line-height: 1.45;
+      animation: toast-in .2s ease-out;
+    }
+
+    .toast.error {
+      border-color: rgba(255, 116, 127, .48);
+    }
+
+    .toast.success {
+      border-color: rgba(78, 211, 154, .42);
+    }
+
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    @media (max-width: 1050px) {
+      .topbar {
+        flex-wrap: wrap;
+      }
+
+      .control.model-control {
+        width: min(330px, calc(100vw - 500px));
+      }
+
+      .top-spacer {
+        display: none;
+      }
+
+      .resource-wrap {
+        margin-left: auto;
+      }
+
+      .advanced-grid {
+        grid-template-columns: repeat(3, minmax(100px, 1fr));
+      }
+    }
+
+    @media (max-width: 900px) {
+      .assistant-grid,
+      .generation-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .pane-content {
+        max-height: 420px;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .app {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .sidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: min(300px, calc(100vw - 46px));
+        transform: translateX(-103%);
+        transition: transform .2s ease;
+        box-shadow: var(--shadow);
+      }
+
+      .sidebar.open {
+        transform: translateX(0);
+      }
+
+      .mobile-menu {
+        display: inline-grid;
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr) minmax(92px, 106px);
+        align-items: end;
+        padding: 9px 10px;
+      }
+
+      .control.model-control {
+        width: auto;
+      }
+
+      .control.placement-control {
+        width: auto;
+      }
+
+      .top-actions {
+        display: grid;
+        grid-column: 1 / 3;
+        grid-template-columns: repeat(3, minmax(0, auto));
+        justify-content: start;
+        margin-left: 0;
+      }
+
+      .top-actions .button {
+        min-width: 0;
+      }
+
+      .resource-wrap {
+        grid-column: 3;
+        justify-self: end;
+        margin-left: 0;
+      }
+
+      .resource-button span {
+        display: none;
+      }
+
+      .conversation-shell {
+        width: calc(100% - 22px);
+        padding-top: 21px;
+      }
+
+      .main,
+      .workspace,
+      .scroll-region,
+      .composer-wrap,
+      .composer,
+      .task-row,
+      .composer-main {
+        min-width: 0;
+        max-width: 100%;
+      }
+
+      .composer-wrap {
+        padding: 0 8px 8px;
+      }
+
+      .task-row {
+        width: 100%;
+        overscroll-behavior-x: contain;
+      }
+
+      .composer-main {
+        display: grid;
+        grid-template-columns: 31px minmax(0, 1fr) auto;
+      }
+
+      .send-button {
+        min-width: 70px;
+      }
+
+      .message-body,
+      .assistant-grid,
+      .generation-grid,
+      .live-metrics,
+      .structured,
+      .message-metrics,
+      .message-media {
+        margin-left: 0;
+      }
+
+      .message.user .message-body {
+        max-width: 100%;
+      }
+
+      .advanced-grid {
+        grid-template-columns: repeat(2, minmax(100px, 1fr));
+      }
+
+      .composer-hint {
+        font-size: 10px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .top-actions .button span,
+      #resetButton span {
+        display: none;
+      }
+
+      .button {
+        padding: 0 10px;
+      }
+
+      .control.placement-control {
+        width: auto;
+      }
+
+      .resource-panel {
+        position: fixed;
+        top: 111px;
+        right: 8px;
+      }
+
+      .advanced-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .hero {
+        min-height: 360px;
+      }
+
+      .hero-pills {
+        display: none;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar" aria-label="Sessions">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">Q3</div>
+        <div class="brand-copy">
+          <div class="brand-title">Qwen3 VL</div>
+          <div class="brand-subtitle">FP8 Studio</div>
+        </div>
+      </div>
+      <div class="sidebar-tools">
+        <button class="new-chat" id="newChatButton" type="button"><span aria-hidden="true">＋</span> New session</button>
+        <label class="sr-only" for="sessionSearch">Search sessions</label>
+        <input class="session-search" id="sessionSearch" type="search" autocomplete="off" placeholder="Search sessions">
+      </div>
+      <div class="sidebar-label">Recent</div>
+      <div class="sessions" id="sessionList"></div>
+      <div class="sidebar-footer">
+        <div class="connection"><span class="status-dot" id="connectionDot"></span><span id="connectionText">Connecting</span></div>
+        <span id="versionText">local</span>
+      </div>
+    </aside>
+    <button class="backdrop" id="backdrop" type="button" aria-label="Close sessions"></button>
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" id="mobileMenuButton" type="button" aria-label="Open sessions">☰</button>
+        <div class="control model-control">
+          <label for="modelSelect">FP8 model</label>
+          <select id="modelSelect" aria-label="FP8 model"><option value="">Loading models…</option></select>
+        </div>
+        <div class="control placement-control">
+          <label for="placementSelect">Placement</label>
+          <select id="placementSelect"><option value="single">Single</option><option value="balanced">Balanced</option></select>
+        </div>
+        <div class="top-actions">
+          <button class="button primary" id="loadButton" type="button">Load</button>
+          <button class="button" id="unloadButton" type="button">Unload</button>
+          <button class="button" id="resetButton" type="button" title="Reset current session">↺ <span>Reset</span></button>
+        </div>
+        <div class="top-spacer"></div>
+        <div class="resource-wrap">
+          <button class="button resource-button" id="resourceButton" type="button" aria-haspopup="true" aria-expanded="false">GPU <span id="resourceSummary">—</span></button>
+          <div class="resource-panel" id="resourcePanel" role="dialog" aria-label="Memory usage">
+            <div class="resource-head"><span class="resource-title">Runtime memory</span><span class="rss-value" id="rssValue">RSS —</span></div>
+            <div id="gpuList"></div>
+          </div>
+        </div>
+      </header>
+      <section class="workspace">
+        <div class="scroll-region" id="scrollRegion">
+          <div class="conversation-shell">
+            <section class="hero" id="hero">
+              <div class="hero-inner">
+                <div class="hero-orb" aria-hidden="true">VL</div>
+                <h1>Read the visual world</h1>
+                <p>Drop images or video, choose a focused task, and inspect the answer and model reasoning side by side.</p>
+                <div class="hero-pills" aria-hidden="true">
+                  <span class="hero-pill">Visual description</span>
+                  <span class="hero-pill">OCR</span>
+                  <span class="hero-pill">Formula extraction</span>
+                  <span class="hero-pill">Chart analysis</span>
+                </div>
+              </div>
+            </section>
+            <div id="conversation"></div>
+            <section class="generation-card" id="generationCard" hidden aria-live="polite">
+              <div class="generation-top"><span class="pulse"></span><span class="generation-label">Qwen3 VL</span><span class="generation-stage" id="generationStage">Preparing</span></div>
+              <div class="live-metrics" id="liveMetrics"></div>
+              <div class="generation-grid">
+                <section class="response-pane">
+                  <div class="pane-head"><span>Chat</span><div class="pane-actions"><button class="pane-action" id="copyLiveAnswer" type="button" aria-label="Copy answer">⧉</button><button class="pane-action" id="downloadLiveAnswer" type="button" aria-label="Download answer">↓</button></div></div>
+                  <div class="pane-content" id="liveAnswer"><span class="pane-placeholder">Answer tokens will appear here</span></div>
+                </section>
+                <section class="response-pane thinking-pane">
+                  <div class="pane-head"><span>Thinking</span><div class="pane-actions"><button class="pane-action" id="copyLiveReasoning" type="button" aria-label="Copy reasoning">⧉</button></div></div>
+                  <div class="pane-content" id="liveReasoning"><span class="pane-placeholder">Reasoning tokens will appear here</span></div>
+                </section>
+              </div>
+              <section class="structured" id="structuredPanel" hidden>
+                <div class="pane-head"><span>Structured JSON</span><div class="pane-actions"><button class="pane-action" id="copyStructured" type="button" aria-label="Copy JSON">⧉</button><button class="pane-action" id="downloadStructured" type="button" aria-label="Download JSON">↓</button></div></div>
+                <pre class="pane-content" id="structuredContent"></pre>
+              </section>
+            </section>
+          </div>
+        </div>
+        <div class="composer-wrap">
+          <section class="composer" id="composer" aria-label="Vision request">
+            <div class="dropzone" id="dropzone" role="button" tabindex="0">Drop images or video here</div>
+            <div class="file-previews" id="filePreviews"></div>
+            <div class="task-row" id="taskRow" aria-label="Task presets"></div>
+            <label class="sr-only" for="customPrompt">Custom prompt</label>
+            <textarea class="custom-prompt" id="customPrompt" placeholder="Tell the model what to inspect…"></textarea>
+            <div class="composer-main">
+              <input class="sr-only" id="fileInput" type="file" accept="image/*,video/*" multiple>
+              <button class="icon-button attach-button" id="attachButton" type="button" aria-label="Attach images or video">＋</button>
+              <div class="composer-hint" id="composerHint"><strong>Add visual media</strong><br>Images and video are supported</div>
+              <button class="button primary send-button" id="sendButton" type="button">Run</button>
+              <button class="button stop-button send-button" id="stopButton" type="button" hidden>Stop</button>
+            </div>
+            <details class="advanced" id="advancedSettings">
+              <summary>Generation settings</summary>
+              <div class="advanced-grid">
+                <label class="advanced-field"><span class="field-label">Max tokens</span><input class="number-input" id="maxTokens" type="number" min="1" max="40960" step="1" value="2048"></label>
+                <label class="advanced-field"><span class="field-label">Max image side</span><input class="number-input" id="maxImageSide" type="number" min="64" max="4096" step="64" value="640"></label>
+                <label class="advanced-field"><span class="field-label">Sampling</span><span class="toggle-field"><input id="doSample" type="checkbox" checked> Enable</span></label>
+                <label class="advanced-field"><span class="field-label">Temperature</span><input class="number-input" id="temperature" type="number" min="0.01" max="5" step="0.05" value="0.6"></label>
+                <label class="advanced-field"><span class="field-label">Top P</span><input class="number-input" id="topP" type="number" min="0.01" max="1" step="0.01" value="0.95"></label>
+                <label class="advanced-field"><span class="field-label">Top K</span><input class="number-input" id="topK" type="number" min="1" max="1000" step="1" value="20"></label>
+              </div>
+            </details>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <div class="sr-only" id="announcer" aria-live="assertive"></div>
+  <script>
+    (() => {
+      "use strict";
+
+      const $ = id => document.getElementById(id);
+      const elements = {
+        sidebar: $("sidebar"),
+        backdrop: $("backdrop"),
+        mobileMenuButton: $("mobileMenuButton"),
+        newChatButton: $("newChatButton"),
+        sessionSearch: $("sessionSearch"),
+        sessionList: $("sessionList"),
+        connectionDot: $("connectionDot"),
+        connectionText: $("connectionText"),
+        modelSelect: $("modelSelect"),
+        placementSelect: $("placementSelect"),
+        loadButton: $("loadButton"),
+        unloadButton: $("unloadButton"),
+        resetButton: $("resetButton"),
+        resourceButton: $("resourceButton"),
+        resourceSummary: $("resourceSummary"),
+        resourcePanel: $("resourcePanel"),
+        rssValue: $("rssValue"),
+        gpuList: $("gpuList"),
+        scrollRegion: $("scrollRegion"),
+        hero: $("hero"),
+        conversation: $("conversation"),
+        generationCard: $("generationCard"),
+        generationStage: $("generationStage"),
+        liveMetrics: $("liveMetrics"),
+        liveAnswer: $("liveAnswer"),
+        liveReasoning: $("liveReasoning"),
+        structuredPanel: $("structuredPanel"),
+        structuredContent: $("structuredContent"),
+        copyLiveAnswer: $("copyLiveAnswer"),
+        downloadLiveAnswer: $("downloadLiveAnswer"),
+        copyLiveReasoning: $("copyLiveReasoning"),
+        copyStructured: $("copyStructured"),
+        downloadStructured: $("downloadStructured"),
+        composer: $("composer"),
+        dropzone: $("dropzone"),
+        fileInput: $("fileInput"),
+        filePreviews: $("filePreviews"),
+        attachButton: $("attachButton"),
+        taskRow: $("taskRow"),
+        customPrompt: $("customPrompt"),
+        composerHint: $("composerHint"),
+        sendButton: $("sendButton"),
+        stopButton: $("stopButton"),
+        maxTokens: $("maxTokens"),
+        maxImageSide: $("maxImageSide"),
+        doSample: $("doSample"),
+        temperature: $("temperature"),
+        topP: $("topP"),
+        topK: $("topK"),
+        toasts: $("toasts"),
+        announcer: $("announcer")
+      };
+
+      const storageKey = "qwen3vl.ui.v1";
+      const saved = readSaved();
+      const state = {
+        models: [],
+        tasks: [],
+        sessions: [],
+        currentSession: null,
+        currentSessionId: saved.currentSessionId || null,
+        selectedTask: saved.task || "describe",
+        files: [],
+        status: {},
+        memory: {},
+        generating: false,
+        attaching: false,
+        optimistic: null,
+        streamController: null,
+        streamSessionId: null,
+        active: freshActive(),
+        search: ""
+      };
+
+      function freshActive() {
+        return {
+          answer: "",
+          reasoning: "",
+          structured: null,
+          stage: "Preparing",
+          promptTokens: null,
+          visualTokens: null,
+          contextTokens: null,
+          generatedTokens: 0,
+          tokensPerSecond: null,
+          elapsedSeconds: null,
+          done: false,
+          failed: false
+        };
+      }
+
+      function readSaved() {
+        try {
+          return JSON.parse(localStorage.getItem(storageKey) || "{}") || {};
+        } catch {
+          return {};
+        }
+      }
+
+      function saveSettings() {
+        const data = {
+          currentSessionId: state.currentSessionId,
+          model: elements.modelSelect.value,
+          placement: elements.placementSelect.value,
+          task: state.selectedTask,
+          maxTokens: elements.maxTokens.value,
+          maxImageSide: elements.maxImageSide.value,
+          doSample: elements.doSample.checked,
+          temperature: elements.temperature.value,
+          topP: elements.topP.value,
+          topK: elements.topK.value
+        };
+        localStorage.setItem(storageKey, JSON.stringify(data));
+      }
+
+      function node(tag, className, textValue) {
+        const value = document.createElement(tag);
+        if (className) value.className = className;
+        if (textValue !== undefined && textValue !== null) value.textContent = String(textValue);
+        return value;
+      }
+
+      function first(value, keys, fallback = null) {
+        if (!value || typeof value !== "object") return fallback;
+        for (const key of keys) {
+          if (value[key] !== undefined && value[key] !== null) return value[key];
+        }
+        return fallback;
+      }
+
+      function unwrap(value, key) {
+        if (value && typeof value === "object" && !Array.isArray(value) && value[key] !== undefined) return value[key];
+        return value;
+      }
+
+      function collection(value, key, identity) {
+        const raw = unwrap(value, key);
+        if (Array.isArray(raw)) return raw;
+        if (raw && typeof raw === "object") {
+          return Object.entries(raw).map(([name, item]) => {
+            if (item && typeof item === "object") return { [identity]: item[identity] || name, ...item };
+            return { [identity]: name, label: String(item) };
+          });
+        }
+        return [];
+      }
+
+      async function request(path, options = {}) {
+        const config = { ...options, headers: { ...(options.headers || {}) } };
+        if (Object.prototype.hasOwnProperty.call(config, "json")) {
+          config.body = JSON.stringify(config.json);
+          delete config.json;
+          config.headers["Content-Type"] = "application/json";
+        }
+        const response = await fetch(path, config);
+        if (!response.ok) {
+          let detail = "";
+          try {
+            const data = await response.json();
+            detail = first(data, ["detail", "error", "message"], JSON.stringify(data));
+          } catch {
+            detail = await response.text();
+          }
+          const error = new Error(detail || `${response.status} ${response.statusText}`);
+          error.status = response.status;
+          throw error;
+        }
+        if (response.status === 204) return null;
+        const type = response.headers.get("content-type") || "";
+        if (type.includes("application/json")) return response.json();
+        return response.text();
+      }
+
+      function toast(message, kind = "") {
+        const item = node("div", `toast ${kind}`.trim(), message);
+        elements.toasts.append(item);
+        window.setTimeout(() => item.remove(), 4200);
+      }
+
+      function announce(message) {
+        elements.announcer.textContent = "";
+        window.setTimeout(() => { elements.announcer.textContent = message; }, 20);
+      }
+
+      function readableBytes(bytes) {
+        const value = Number(bytes);
+        if (!Number.isFinite(value) || value < 0) return "";
+        if (value < 1024) return `${value} B`;
+        if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+        if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+        return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
+      }
+
+      function readableMiB(value) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) return "—";
+        if (number >= 1024) return `${(number / 1024).toFixed(1)} GiB`;
+        return `${Math.round(number)} MiB`;
+      }
+
+      function readableTime(value) {
+        if (!value) return "";
+        const numeric = Number(value);
+        const date = new Date(Number.isFinite(numeric) && numeric > 0 && numeric < 100000000000 ? numeric * 1000 : value);
+        if (Number.isNaN(date.getTime())) return "";
+        const now = new Date();
+        if (date.toDateString() === now.toDateString()) return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        return date.toLocaleDateString([], { month: "short", day: "numeric" });
+      }
+
+      function formatNumber(value, digits = 0) {
+        const number = Number(value);
+        return Number.isFinite(number) ? number.toLocaleString(undefined, { maximumFractionDigits: digits }) : "—";
+      }
+
+      function selectedModel() {
+        return state.models.find(model => String(model.id) === elements.modelSelect.value) || null;
+      }
+
+      function selectedTask() {
+        return state.tasks.find(task => String(task.key) === state.selectedTask) || null;
+      }
+
+      function renderModels() {
+        const previous = saved.model || elements.modelSelect.value;
+        elements.modelSelect.replaceChildren();
+        for (const model of state.models) {
+          const option = node("option");
+          option.value = String(model.id);
+          const suffix = model.available === false ? " · unavailable" : model.parameters_b ? ` · ${model.parameters_b}B FP8` : " · FP8";
+          option.textContent = `${model.display_name || model.id}${suffix}`;
+          option.disabled = model.available === false;
+          elements.modelSelect.append(option);
+        }
+        const preferred = state.models.find(model => String(model.id) === String(previous) && model.available !== false);
+        const available = preferred || state.models.find(model => model.available !== false) || state.models[0];
+        if (available) elements.modelSelect.value = String(available.id);
+        updatePlacements();
+      }
+
+      function updatePlacements() {
+        const model = selectedModel();
+        const placements = model && Array.isArray(model.placements) && model.placements.length ? model.placements : ["single", "balanced"];
+        const preferred = saved.placement || elements.placementSelect.value || "single";
+        elements.placementSelect.replaceChildren();
+        for (const placement of placements) {
+          const option = node("option", "", placement === "single" ? "Single GPU" : placement === "balanced" ? "Balanced" : placement);
+          option.value = placement;
+          elements.placementSelect.append(option);
+        }
+        elements.placementSelect.value = placements.includes(preferred) ? preferred : placements[0];
+        saveSettings();
+      }
+
+      function renderTasks() {
+        elements.taskRow.replaceChildren();
+        if (!state.tasks.some(task => task.key === state.selectedTask) && state.tasks[0]) state.selectedTask = state.tasks[0].key;
+        for (const task of state.tasks) {
+          const button = node("button", `task-chip${task.key === state.selectedTask ? " active" : ""}`, task.label || task.key);
+          button.type = "button";
+          button.dataset.task = task.key;
+          button.setAttribute("aria-pressed", String(task.key === state.selectedTask));
+          button.title = task.prompt || task.label || task.key;
+          button.addEventListener("click", () => chooseTask(task.key, true));
+          elements.taskRow.append(button);
+        }
+        updateTaskUI(false);
+      }
+
+      function chooseTask(key, applyDefaults) {
+        state.selectedTask = key;
+        for (const button of elements.taskRow.querySelectorAll(".task-chip")) {
+          const active = button.dataset.task === key;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", String(active));
+        }
+        updateTaskUI(applyDefaults);
+        saveSettings();
+      }
+
+      function updateTaskUI(applyDefaults) {
+        const task = selectedTask();
+        const custom = state.selectedTask === "custom" || Boolean(task && task.accepts_custom_prompt);
+        elements.customPrompt.classList.toggle("visible", custom);
+        if (applyDefaults && task) {
+          if (task.default_max_new_tokens) elements.maxTokens.value = task.default_max_new_tokens;
+          if (task.default_max_image_side) elements.maxImageSide.value = task.default_max_image_side;
+        }
+        const label = task ? task.label || task.key : "vision task";
+        elements.composerHint.replaceChildren();
+        const strong = node("strong", "", label);
+        const existingMedia = state.currentSession && Array.isArray(state.currentSession.media) ? state.currentSession.media.length : 0;
+        const mediaHint = state.files.length
+          ? `${state.files.length} file${state.files.length === 1 ? "" : "s"} ready`
+          : existingMedia
+            ? `${existingMedia} saved visual${existingMedia === 1 ? "" : "s"} will be reused`
+            : "Add images or video";
+        elements.composerHint.append(strong, document.createElement("br"), document.createTextNode(mediaHint));
+        if (custom) elements.customPrompt.focus({ preventScroll: true });
+      }
+
+      function renderSessions() {
+        const query = state.search.trim().toLowerCase();
+        const sessions = state.sessions.filter(session => String(session.title || "Untitled session").toLowerCase().includes(query));
+        elements.sessionList.replaceChildren();
+        if (!sessions.length) {
+          elements.sessionList.append(node("div", "empty-sessions", query ? "No matching sessions" : "No sessions yet. Start with a visual task."));
+          return;
+        }
+        for (const session of sessions) {
+          const id = String(session.id);
+          const row = node("div", `session-row${id === String(state.currentSessionId) ? " active" : ""}`);
+          const main = node("button", "session-main");
+          main.type = "button";
+          main.append(node("div", "session-title", session.title || "Untitled session"));
+          const count = Array.isArray(session.messages) ? session.messages.length : first(session, ["message_count"], 0);
+          const meta = [readableTime(session.updated_at || session.created_at), count ? `${count} msg` : ""].filter(Boolean).join(" · ");
+          main.append(node("div", "session-meta", meta || session.model_id || "Ready"));
+          main.addEventListener("click", () => selectSession(id));
+          const actions = node("div", "session-actions");
+          const rename = node("button", "icon-button", "✎");
+          rename.type = "button";
+          rename.title = "Rename session";
+          rename.setAttribute("aria-label", `Rename ${session.title || "session"}`);
+          rename.addEventListener("click", event => { event.stopPropagation(); renameSession(session); });
+          const remove = node("button", "icon-button danger", "×");
+          remove.type = "button";
+          remove.title = "Delete session";
+          remove.setAttribute("aria-label", `Delete ${session.title || "session"}`);
+          remove.addEventListener("click", event => { event.stopPropagation(); deleteSession(session); });
+          actions.append(rename, remove);
+          row.append(main, actions);
+          elements.sessionList.append(row);
+        }
+      }
+
+      async function refreshSessions() {
+        const data = await request("/api/sessions");
+        state.sessions = collection(data, "sessions", "id");
+        state.sessions.sort((a, b) => Number(b.updated_at || b.created_at || 0) - Number(a.updated_at || a.created_at || 0));
+        renderSessions();
+      }
+
+      async function createSession(select = true) {
+        const payload = { model_id: elements.modelSelect.value || null };
+        const data = await request("/api/sessions", { method: "POST", json: payload });
+        const session = unwrap(data, "session") || data;
+        if (!session || !session.id) throw new Error("Server did not return a session ID");
+        state.sessions = [session, ...state.sessions.filter(item => String(item.id) !== String(session.id))];
+        if (select) {
+          state.currentSession = session;
+          state.currentSessionId = String(session.id);
+          state.optimistic = null;
+          hideGeneration();
+          renderConversation();
+          closeSidebar();
+        }
+        renderSessions();
+        saveSettings();
+        return session;
+      }
+
+      async function selectSession(id, options = {}) {
+        if (!id) return;
+        const switching = state.currentSessionId && String(state.currentSessionId) !== String(id);
+        if (switching && state.generating) hideGeneration();
+        if (state.streamController && String(state.streamSessionId) !== String(id)) state.streamController.abort();
+        state.currentSessionId = String(id);
+        saveSettings();
+        renderSessions();
+        try {
+          const data = await request(`/api/sessions/${encodeURIComponent(id)}`);
+          state.currentSession = unwrap(data, "session") || data;
+          state.optimistic = null;
+          renderConversation();
+          closeSidebar();
+          const generation = state.currentSession && state.currentSession.generation;
+          if (options.attach !== false && generation && !generation.done) attachStream(id);
+        } catch (error) {
+          if (error.status === 404) {
+            state.currentSessionId = null;
+            state.currentSession = null;
+            saveSettings();
+            await refreshSessions();
+            renderConversation();
+          } else {
+            toast(error.message, "error");
+          }
+        }
+      }
+
+      async function renameSession(session) {
+        const title = window.prompt("Session title", session.title || "Untitled session");
+        if (!title || title.trim() === session.title) return;
+        try {
+          const data = await request(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "PATCH", json: { title: title.trim() } });
+          const updated = unwrap(data, "session") || data;
+          if (updated && typeof updated === "object" && updated.title) Object.assign(session, updated);
+          session.title = title.trim();
+          if (String(state.currentSessionId) === String(session.id) && state.currentSession) Object.assign(state.currentSession, session);
+          renderSessions();
+        } catch (error) {
+          toast(error.message, "error");
+        }
+      }
+
+      async function deleteSession(session) {
+        if (!window.confirm(`Delete “${session.title || "Untitled session"}”?`)) return;
+        try {
+          await request(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+          state.sessions = state.sessions.filter(item => String(item.id) !== String(session.id));
+          if (String(state.currentSessionId) === String(session.id)) {
+            if (state.streamController) state.streamController.abort();
+            state.currentSessionId = null;
+            state.currentSession = null;
+            state.optimistic = null;
+            hideGeneration();
+            renderConversation();
+            saveSettings();
+          }
+          renderSessions();
+          toast("Session deleted", "success");
+        } catch (error) {
+          toast(error.message, "error");
+        }
+      }
+
+      async function resetSession() {
+        if (!state.currentSessionId) return;
+        if (!window.confirm("Clear all messages and media in this session?")) return;
+        try {
+          if (state.generating) await stopGeneration();
+          const data = await request(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/reset`, { method: "POST" });
+          const session = data && typeof data === "object" ? data.session : null;
+          if (session) state.currentSession = session;
+          else await selectSession(state.currentSessionId, { attach: false });
+          state.optimistic = null;
+          clearFiles();
+          hideGeneration();
+          renderConversation();
+          await refreshSessions();
+          toast("Session reset", "success");
+        } catch (error) {
+          toast(error.message, "error");
+        }
+      }
+
+      function mediaForMessage(session, message, index) {
+        const embedded = Array.isArray(message.media) ? message.media : Array.isArray(message.attachments) ? message.attachments : [];
+        if (embedded.length) return [...embedded];
+        const all = Array.isArray(session.media) ? session.media : [];
+        const matched = all.filter(media => message.id && media.message_id && String(media.message_id) === String(message.id));
+        const messages = Array.isArray(session.messages) ? session.messages : [];
+        const firstUserIndex = messages.findIndex(item => String(item.role).toLowerCase() === "user");
+        if (String(message.role).toLowerCase() === "user" && index === firstUserIndex) {
+          matched.push(...all.filter(media => !media.message_id));
+        }
+        return matched;
+      }
+
+      function mediaElement(media, sourceOverride) {
+        const figure = node("figure");
+        const type = String(media.media_type || media.mime_type || media.type || "").toLowerCase();
+        const source = sourceOverride || media.url || media.src || (media.id ? `/api/media/${encodeURIComponent(media.id)}` : "");
+        const visual = document.createElement(type.includes("video") ? "video" : "img");
+        visual.src = source;
+        if (visual.tagName === "VIDEO") {
+          visual.controls = true;
+          visual.preload = "metadata";
+        } else {
+          visual.alt = media.original_name || media.name || "Attached image";
+          visual.loading = "lazy";
+        }
+        figure.append(visual, node("figcaption", "", media.original_name || media.name || "Visual media"));
+        return figure;
+      }
+
+      function renderConversation() {
+        elements.conversation.replaceChildren();
+        const session = state.currentSession;
+        const messages = session && Array.isArray(session.messages) ? [...session.messages] : [];
+        if (state.optimistic) messages.push(state.optimistic);
+        elements.hero.hidden = messages.length > 0 || !elements.generationCard.hidden;
+        messages.forEach((message, index) => elements.conversation.append(renderMessage(message, session || {}, index)));
+        updateTaskUI(false);
+      }
+
+      function renderMessage(message, session, index) {
+        const role = String(message.role || "assistant").toLowerCase();
+        const assistant = role !== "user";
+        const wrapper = node("article", `message ${assistant ? "assistant" : "user"}`);
+        const head = node("div", "message-head");
+        head.append(node("div", "avatar", assistant ? "Q3" : "You"), node("span", "message-author", assistant ? "Qwen3 VL" : "You"));
+        const time = readableTime(message.created_at || message.timestamp);
+        if (time) head.append(node("span", "message-time", time));
+        wrapper.append(head);
+        const content = String(first(message, ["content", "answer", "text"], ""));
+        const reasoning = String(first(message, ["reasoning", "thinking"], ""));
+        if (assistant) {
+          const grid = node("div", "assistant-grid");
+          grid.append(responsePane("Chat", content || "No answer returned", false), responsePane("Thinking", reasoning || "No reasoning recorded", true));
+          wrapper.append(grid);
+        } else {
+          wrapper.append(node("div", "message-body", content));
+        }
+        const media = mediaForMessage(session, message, index);
+        if (Array.isArray(message.localMedia)) media.push(...message.localMedia);
+        if (media.length) {
+          const gallery = node("div", "message-media");
+          for (const item of media) gallery.append(mediaElement(item, item.objectUrl));
+          wrapper.append(gallery);
+        }
+        const storedMetrics = message.metrics || message.result || {};
+        const metrics = storedMetrics.generation || storedMetrics.result || storedMetrics;
+        const metricValues = metricsFrom(metrics);
+        if (metricValues.length) {
+          const row = node("div", "message-metrics");
+          for (const metric of metricValues) row.append(node("span", "metric-chip", `${metric.label} ${metric.value}`));
+          wrapper.append(row);
+        }
+        const structured = first(message, ["structured", "structured_output"], first(storedMetrics, ["structured", "structured_output"], null));
+        if (assistant && structured !== null && structured !== undefined) wrapper.append(structuredBlock(structured));
+        return wrapper;
+      }
+
+      function responsePane(title, content, thinking) {
+        const pane = node("section", `response-pane${thinking ? " thinking-pane" : ""}`);
+        const head = node("div", "pane-head");
+        head.append(node("span", "", title));
+        const actions = node("div", "pane-actions");
+        const copy = node("button", "pane-action", "⧉");
+        copy.type = "button";
+        copy.setAttribute("aria-label", `Copy ${title.toLowerCase()}`);
+        copy.addEventListener("click", () => copyText(content));
+        actions.append(copy);
+        if (!thinking) {
+          const download = node("button", "pane-action", "↓");
+          download.type = "button";
+          download.setAttribute("aria-label", "Download answer");
+          download.addEventListener("click", () => downloadText(content, "qwen3-vl-answer.txt", "text/plain"));
+          actions.append(download);
+        }
+        head.append(actions);
+        pane.append(head, node("div", "pane-content", content));
+        return pane;
+      }
+
+      function structuredBlock(value) {
+        const section = node("section", "structured");
+        const head = node("div", "pane-head");
+        head.append(node("span", "", "Structured JSON"));
+        const actions = node("div", "pane-actions");
+        const text = structuredText(value);
+        const copy = node("button", "pane-action", "⧉");
+        copy.type = "button";
+        copy.setAttribute("aria-label", "Copy JSON");
+        copy.addEventListener("click", () => copyText(text));
+        const download = node("button", "pane-action", "↓");
+        download.type = "button";
+        download.setAttribute("aria-label", "Download JSON");
+        download.addEventListener("click", () => downloadText(text, "qwen3-vl-result.json", "application/json"));
+        actions.append(copy, download);
+        head.append(actions);
+        section.append(head, node("pre", "pane-content", text));
+        return section;
+      }
+
+      function structuredText(value) {
+        if (typeof value === "string") {
+          try {
+            return JSON.stringify(JSON.parse(value), null, 2);
+          } catch {
+            return value;
+          }
+        }
+        try {
+          return JSON.stringify(value, null, 2);
+        } catch {
+          return String(value);
+        }
+      }
+
+      function metricsFrom(metrics) {
+        const values = [];
+        const prompt = first(metrics, ["prompt_tokens"], null);
+        const visual = first(metrics, ["visual_tokens"], null);
+        const generated = first(metrics, ["generated_tokens", "completion_tokens"], null);
+        const speed = first(metrics, ["tokens_per_second", "tps"], null);
+        const elapsed = first(metrics, ["generation_seconds", "elapsed_seconds"], null);
+        if (prompt !== null) values.push({ label: "Prompt", value: formatNumber(prompt) });
+        if (visual !== null) values.push({ label: "Visual", value: formatNumber(visual) });
+        if (generated !== null) values.push({ label: "Generated", value: formatNumber(generated) });
+        if (speed !== null) values.push({ label: "Speed", value: `${formatNumber(speed, 2)} tok/s` });
+        if (elapsed !== null) values.push({ label: "Elapsed", value: `${formatNumber(elapsed, 2)}s` });
+        return values;
+      }
+
+      function addFiles(fileList) {
+        const incoming = Array.from(fileList || []).filter(file => file.type.startsWith("image/") || file.type.startsWith("video/"));
+        if (!incoming.length) {
+          toast("Choose image or video files", "error");
+          return;
+        }
+        const existing = new Set(state.files.map(item => `${item.file.name}:${item.file.size}:${item.file.lastModified}`));
+        for (const file of incoming) {
+          const key = `${file.name}:${file.size}:${file.lastModified}`;
+          if (existing.has(key)) continue;
+          state.files.push({ file, objectUrl: URL.createObjectURL(file) });
+          existing.add(key);
+        }
+        renderFiles();
+      }
+
+      function renderFiles() {
+        elements.filePreviews.replaceChildren();
+        state.files.forEach((item, index) => {
+          const preview = node("div", "file-preview");
+          const visual = document.createElement(item.file.type.startsWith("video/") ? "video" : "img");
+          visual.src = item.objectUrl;
+          if (visual.tagName === "VIDEO") {
+            visual.muted = true;
+            visual.preload = "metadata";
+          } else {
+            visual.alt = item.file.name;
+          }
+          const remove = node("button", "file-remove", "×");
+          remove.type = "button";
+          remove.setAttribute("aria-label", `Remove ${item.file.name}`);
+          remove.addEventListener("click", () => removeFile(index));
+          preview.append(visual, node("div", "file-preview-name", item.file.name), node("div", "file-preview-size", readableBytes(item.file.size)), remove);
+          elements.filePreviews.append(preview);
+        });
+        updateTaskUI(false);
+        updateSendState();
+      }
+
+      function removeFile(index) {
+        const [removed] = state.files.splice(index, 1);
+        if (removed) URL.revokeObjectURL(removed.objectUrl);
+        renderFiles();
+      }
+
+      function clearFiles() {
+        for (const item of state.files) URL.revokeObjectURL(item.objectUrl);
+        state.files = [];
+        renderFiles();
+      }
+
+      function showDropzone(show) {
+        elements.dropzone.classList.toggle("visible", show);
+      }
+
+      async function refreshStatus() {
+        try {
+          state.status = await request("/api/status") || {};
+          renderStatus();
+        } catch {
+          elements.connectionDot.className = "status-dot";
+          elements.connectionText.textContent = "Offline";
+        }
+      }
+
+      function renderStatus() {
+        const status = state.status || {};
+        const busy = Boolean(status.busy || status.loading || state.generating);
+        const loaded = Boolean(status.loaded);
+        elements.connectionDot.className = `status-dot${busy ? " busy" : loaded ? " good" : ""}`;
+        elements.connectionText.textContent = status.loading ? "Loading model" : status.busy || state.generating ? "Generating" : loaded ? "Model ready" : "Runtime ready";
+        elements.loadButton.disabled = Boolean(status.loading || state.generating);
+        elements.unloadButton.disabled = !loaded || Boolean(status.loading || status.busy || state.generating);
+        elements.modelSelect.disabled = Boolean(status.loading || state.generating);
+        elements.placementSelect.disabled = Boolean(status.loading || state.generating);
+        elements.loadButton.textContent = status.loading ? "Loading…" : loaded && String(status.model_id) === elements.modelSelect.value && String(status.placement || "") === elements.placementSelect.value ? "Reload" : "Load";
+        updateSendState();
+      }
+
+      async function refreshMemory() {
+        try {
+          state.memory = await request("/api/memory") || {};
+          renderMemory();
+        } catch {
+          state.memory = {};
+          renderMemory();
+        }
+      }
+
+      function renderMemory() {
+        const memory = state.memory || {};
+        const gpus = Array.isArray(memory.gpus) ? memory.gpus : [];
+        elements.rssValue.textContent = `RSS ${readableMiB(memory.rss_mib)}`;
+        elements.gpuList.replaceChildren();
+        if (!gpus.length) {
+          elements.resourceSummary.textContent = "CPU";
+          elements.gpuList.append(node("div", "resource-empty", "No visible GPU memory data"));
+          return;
+        }
+        const used = gpus.reduce((sum, gpu) => sum + Number(gpu.used_mib || 0), 0);
+        const total = gpus.reduce((sum, gpu) => sum + Number(gpu.total_mib || 0), 0);
+        elements.resourceSummary.textContent = `${readableMiB(used)} / ${readableMiB(total)}`;
+        for (const gpu of gpus) {
+          const usedMiB = Number(gpu.used_mib || 0);
+          const totalMiB = Number(gpu.total_mib || 0);
+          const ratio = totalMiB > 0 ? Math.min(100, Math.max(0, usedMiB / totalMiB * 100)) : 0;
+          const row = node("div", "gpu-row");
+          const labels = node("div", "gpu-labels");
+          labels.append(node("span", "gpu-name", `GPU ${gpu.index} · ${gpu.name || "NVIDIA"}`), node("span", "gpu-value", `${readableMiB(usedMiB)} / ${readableMiB(totalMiB)}`));
+          const bar = node("div", "bar");
+          const fill = node("div", "bar-fill");
+          fill.style.width = `${ratio}%`;
+          bar.append(fill);
+          row.append(labels, bar);
+          const allocated = Number(gpu.process_allocated_mib);
+          const reserved = Number(gpu.process_reserved_mib);
+          if (Number.isFinite(allocated) || Number.isFinite(reserved)) {
+            row.append(node("div", "session-meta", `Process ${readableMiB(allocated)} allocated · ${readableMiB(reserved)} reserved`));
+          }
+          elements.gpuList.append(row);
+        }
+      }
+
+      async function loadModel(silent = false) {
+        const modelId = elements.modelSelect.value;
+        if (!modelId) throw new Error("No model is available");
+        elements.loadButton.disabled = true;
+        elements.loadButton.textContent = "Loading…";
+        elements.connectionDot.className = "status-dot busy";
+        elements.connectionText.textContent = "Loading model";
+        try {
+          const data = await request("/api/load", { method: "POST", json: { model_id: modelId, placement: elements.placementSelect.value } });
+          if (data && typeof data === "object") state.status = { ...state.status, ...data };
+          await Promise.all([refreshStatus(), refreshMemory()]);
+          if (!silent) toast("Model loaded", "success");
+        } catch (error) {
+          await refreshStatus();
+          throw error;
+        }
+      }
+
+      async function unloadModel() {
+        try {
+          await request("/api/unload", { method: "POST" });
+          await Promise.all([refreshStatus(), refreshMemory()]);
+          toast("Model unloaded", "success");
+        } catch (error) {
+          toast(error.message, "error");
+        }
+      }
+
+      async function ensureModel() {
+        const status = state.status || {};
+        const matches = status.loaded && String(status.model_id) === elements.modelSelect.value && (!status.placement || String(status.placement) === elements.placementSelect.value);
+        if (!matches) await loadModel(true);
+      }
+
+      function optimisticMessage() {
+        const task = selectedTask();
+        const custom = elements.customPrompt.value.trim();
+        const label = task ? task.label || task.key : "Vision task";
+        return {
+          role: "user",
+          content: custom ? `${label}\n${custom}` : label,
+          created_at: new Date().toISOString(),
+          localMedia: state.files.map(item => ({ name: item.file.name, media_type: item.file.type, objectUrl: item.objectUrl }))
+        };
+      }
+
+      async function sendChat() {
+        if (state.generating) return;
+        if (state.selectedTask === "custom" && !elements.customPrompt.value.trim()) {
+          toast("Enter a custom prompt", "error");
+          elements.customPrompt.focus();
+          return;
+        }
+        try {
+          if (!state.currentSessionId) await createSession(true);
+          const sessionMessages = state.currentSession && Array.isArray(state.currentSession.messages) ? state.currentSession.messages.length : 0;
+          const sessionMedia = state.currentSession && Array.isArray(state.currentSession.media) ? state.currentSession.media.length : 0;
+          const modelDiffers = state.currentSession && state.currentSession.model_id && String(state.currentSession.model_id) !== elements.modelSelect.value;
+          const uploadingToNonempty = state.files.length && (sessionMessages || sessionMedia);
+          if (modelDiffers || uploadingToNonempty) {
+            await createSession(true);
+            toast(modelDiffers ? "Started a new session for the selected model" : "Started a new session for the new media");
+          }
+          const reusableMedia = state.currentSession && Array.isArray(state.currentSession.media) && state.currentSession.media.length;
+          if (!state.files.length && !reusableMedia) {
+            showDropzone(true);
+            toast("Add at least one image or video", "error");
+            elements.attachButton.focus();
+            return;
+          }
+          await ensureModel();
+          state.optimistic = optimisticMessage();
+          renderConversation();
+          beginGeneration("Uploading media");
+          if (state.streamController) state.streamController.abort();
+          const controller = new AbortController();
+          state.streamController = controller;
+          state.streamSessionId = state.currentSessionId;
+          const form = new FormData();
+          form.append("session_id", state.currentSessionId);
+          form.append("model_id", elements.modelSelect.value);
+          form.append("placement", elements.placementSelect.value);
+          form.append("task", state.selectedTask);
+          form.append("custom_prompt", elements.customPrompt.value.trim());
+          form.append("max_new_tokens", elements.maxTokens.value);
+          form.append("max_image_side", elements.maxImageSide.value);
+          form.append("do_sample", String(elements.doSample.checked));
+          form.append("temperature", elements.temperature.value);
+          form.append("top_p", elements.topP.value);
+          form.append("top_k", elements.topK.value);
+          for (const item of state.files) form.append("files", item.file, item.file.name);
+          saveSettings();
+          const response = await fetch("/api/chat", { method: "POST", body: form, signal: controller.signal });
+          if (!response.ok) throw await responseError(response);
+          const headerId = response.headers.get("X-Session-Id");
+          if (headerId) {
+            state.currentSessionId = headerId;
+            state.streamSessionId = headerId;
+            saveSettings();
+          }
+          await consumeResponse(response);
+        } catch (error) {
+          if (error.name !== "AbortError") failGeneration(error.message);
+        }
+      }
+
+      async function responseError(response) {
+        let detail = "";
+        try {
+          const data = await response.json();
+          detail = first(data, ["detail", "error", "message"], JSON.stringify(data));
+        } catch {
+          detail = await response.text();
+        }
+        const error = new Error(detail || `${response.status} ${response.statusText}`);
+        error.status = response.status;
+        return error;
+      }
+
+      function beginGeneration(stage) {
+        state.generating = true;
+        state.active = freshActive();
+        state.active.stage = stage;
+        elements.generationCard.hidden = false;
+        elements.generationCard.className = "generation-card";
+        elements.hero.hidden = true;
+        renderActive();
+        updateSendState();
+        renderStatus();
+        scrollBottom();
+      }
+
+      function hideGeneration() {
+        elements.generationCard.hidden = true;
+        state.active = freshActive();
+        state.generating = false;
+        updateSendState();
+      }
+
+      function failGeneration(message) {
+        state.generating = false;
+        state.active.failed = true;
+        state.active.stage = message || "Generation failed";
+        elements.generationCard.className = "generation-card failed";
+        renderActive();
+        updateSendState();
+        renderStatus();
+        toast(message || "Generation failed", "error");
+        announce(message || "Generation failed");
+      }
+
+      function renderActive() {
+        const active = state.active;
+        elements.generationStage.textContent = active.stage;
+        renderTokenArea(elements.liveAnswer, active.answer, "Answer tokens will appear here");
+        renderTokenArea(elements.liveReasoning, active.reasoning, "Reasoning tokens will appear here");
+        elements.liveMetrics.replaceChildren();
+        const metrics = [
+          ["Prompt", active.promptTokens],
+          ["Visual", active.visualTokens],
+          ["Context", active.contextTokens],
+          ["Generated", active.generatedTokens],
+          ["Speed", active.tokensPerSecond === null ? null : `${formatNumber(active.tokensPerSecond, 2)} tok/s`],
+          ["Elapsed", active.elapsedSeconds === null ? null : `${formatNumber(active.elapsedSeconds, 2)}s`]
+        ];
+        for (const [label, value] of metrics) {
+          const metric = node("div", "live-metric");
+          metric.append(node("div", "live-metric-label", label), node("div", "live-metric-value", value === null || value === undefined ? "—" : value));
+          elements.liveMetrics.append(metric);
+        }
+        const hasStructured = active.structured !== null && active.structured !== undefined;
+        elements.structuredPanel.hidden = !hasStructured;
+        if (hasStructured) elements.structuredContent.textContent = structuredText(active.structured);
+      }
+
+      function renderTokenArea(target, value, placeholder) {
+        if (value) target.textContent = value;
+        else {
+          target.replaceChildren();
+          target.append(node("span", "pane-placeholder", placeholder));
+        }
+        target.scrollTop = target.scrollHeight;
+      }
+
+      function handleEvent(event, eventName) {
+        if (!event || typeof event !== "object") return;
+        const type = event.type || eventName || "message";
+        if (type === "snapshot") {
+          const snapshot = event.snapshot || event;
+          if (elements.generationCard.hidden) beginGeneration(first(snapshot, ["stage", "status", "state"], "Reattached"));
+          assignActive(snapshot);
+          if (snapshot.stats && typeof snapshot.stats === "object") assignActive(snapshot.stats);
+          if (snapshot.result && typeof snapshot.result === "object") assignActive(snapshot.result);
+          if (snapshot.structured !== undefined) state.active.structured = snapshot.structured;
+          if (snapshot.error) {
+            failGeneration(String(snapshot.error));
+          } else if (snapshot.done) {
+            state.active.done = true;
+            state.active.stage = snapshot.result && snapshot.result.stopped ? "Stopped" : "Completed";
+            state.generating = false;
+            elements.generationCard.className = "generation-card done";
+            updateSendState();
+            renderStatus();
+            finishAndRefresh();
+          }
+        } else if (type === "loading") {
+          if (elements.generationCard.hidden) beginGeneration("Loading model");
+          const loadingState = first(event, ["message", "stage", "status", "state"], "Loading model");
+          state.active.stage = loadingState === "loading_model" ? "Loading model" : loadingState === "generating" ? "Generating" : loadingState;
+        } else if (type === "prompt") {
+          if (elements.generationCard.hidden) beginGeneration("Prompt ready");
+          assignActive(event);
+          state.active.stage = "Generating";
+        } else if (type === "token") {
+          if (elements.generationCard.hidden) beginGeneration("Generating");
+          const delta = String(first(event, ["delta", "text", "token", "content"], ""));
+          const phase = String(first(event, ["phase", "channel"], "answer"));
+          if (phase === "reasoning" || phase === "thinking") state.active.reasoning += delta;
+          else state.active.answer += delta;
+          state.active.generatedTokens = Number(first(event, ["generated_tokens"], state.active.generatedTokens)) || state.active.generatedTokens;
+          state.active.stage = phase === "reasoning" ? "Thinking" : "Answering";
+        } else if (type === "stats_live") {
+          assignActive(event);
+        } else if (type === "done") {
+          const result = event.result || event;
+          assignActive(result);
+          if (event.structured !== undefined) state.active.structured = event.structured;
+          state.active.done = true;
+          state.active.stage = result.stopped ? "Stopped" : result.truncated ? "Completed · truncated" : "Completed";
+          state.generating = false;
+          elements.generationCard.className = "generation-card done";
+          clearFiles();
+          updateSendState();
+          renderStatus();
+          announce(state.active.stage);
+          finishAndRefresh();
+        } else if (type === "error") {
+          failGeneration(String(first(event, ["error", "message", "detail"], "Generation failed")));
+        }
+        renderActive();
+        scrollBottom(false);
+      }
+
+      function assignActive(value) {
+        const active = state.active;
+        const answer = first(value, ["answer", "response"], null);
+        const reasoning = first(value, ["reasoning", "thinking"], null);
+        const structured = first(value, ["structured", "structured_output"], null);
+        if (answer !== null) active.answer = String(answer);
+        if (reasoning !== null) active.reasoning = String(reasoning);
+        if (structured !== null) active.structured = structured;
+        active.promptTokens = first(value, ["prompt_tokens"], active.promptTokens);
+        active.visualTokens = first(value, ["visual_tokens"], active.visualTokens);
+        active.contextTokens = first(value, ["context_tokens"], active.contextTokens);
+        active.generatedTokens = first(value, ["generated_tokens", "completion_tokens"], active.generatedTokens);
+        active.tokensPerSecond = first(value, ["tokens_per_second", "tps"], active.tokensPerSecond);
+        active.elapsedSeconds = first(value, ["elapsed_seconds", "generation_seconds"], active.elapsedSeconds);
+        active.stage = first(value, ["stage", "status", "state"], active.stage);
+      }
+
+      async function consumeResponse(response) {
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const data = await response.json();
+          handleEvent(data, data.type || "done");
+          return;
+        }
+        if (!response.body) throw new Error("Streaming response has no body");
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+          let boundary;
+          while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+            const block = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            parseSSEBlock(block);
+          }
+        }
+        buffer += decoder.decode();
+        if (buffer.trim()) parseSSEBlock(buffer);
+      }
+
+      function parseSSEBlock(block) {
+        let eventName = "message";
+        const data = [];
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event:")) eventName = line.slice(6).trim();
+          else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+        }
+        if (!data.length) return;
+        const raw = data.join("\n");
+        try {
+          handleEvent(JSON.parse(raw), eventName);
+        } catch {
+          handleEvent({ type: eventName, text: raw }, eventName);
+        }
+      }
+
+      async function finishAndRefresh() {
+        const id = state.currentSessionId;
+        try {
+          await selectSession(id, { attach: false });
+          state.optimistic = null;
+          if (state.currentSession && Array.isArray(state.currentSession.messages) && state.currentSession.messages.length) elements.generationCard.hidden = true;
+          renderConversation();
+          await Promise.all([refreshSessions(), refreshMemory(), refreshStatus()]);
+        } catch {
+          state.optimistic = null;
+          renderConversation();
+        }
+      }
+
+      function attachStream(id) {
+        if (!id || state.generating) return;
+        if (state.streamController) state.streamController.abort();
+        const controller = new AbortController();
+        state.streamController = controller;
+        state.streamSessionId = String(id);
+        state.attaching = true;
+        fetch(`/api/stream/${encodeURIComponent(id)}`, { signal: controller.signal })
+          .then(async response => {
+            if (response.status === 204 || response.status === 404 || response.status === 409) return;
+            if (!response.ok) throw await responseError(response);
+            await consumeResponse(response);
+          })
+          .catch(error => {
+            if (error.name !== "AbortError" && error.status !== 404 && error.status !== 409) toast(`Stream: ${error.message}`, "error");
+          })
+          .finally(() => {
+            if (state.streamController === controller) {
+              state.attaching = false;
+              state.streamController = null;
+            }
+          });
+      }
+
+      async function stopGeneration() {
+        if (!state.currentSessionId) return;
+        elements.stopButton.disabled = true;
+        try {
+          await request(`/api/stop/${encodeURIComponent(state.currentSessionId)}`, { method: "POST" });
+          state.active.stage = "Stopping";
+          renderActive();
+        } catch (error) {
+          elements.stopButton.disabled = false;
+          toast(error.message, "error");
+        }
+      }
+
+      function updateSendState() {
+        elements.sendButton.hidden = state.generating;
+        elements.stopButton.hidden = !state.generating;
+        elements.stopButton.disabled = false;
+        elements.sendButton.disabled = state.generating || !state.models.length;
+        elements.resetButton.disabled = !state.currentSessionId || state.generating;
+      }
+
+      function scrollBottom(force = true) {
+        const region = elements.scrollRegion;
+        const nearBottom = region.scrollHeight - region.scrollTop - region.clientHeight < 180;
+        if (force || nearBottom) requestAnimationFrame(() => { region.scrollTop = region.scrollHeight; });
+      }
+
+      async function copyText(textValue) {
+        if (!textValue) {
+          toast("Nothing to copy");
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(textValue);
+        } catch {
+          const area = node("textarea");
+          area.value = textValue;
+          area.style.position = "fixed";
+          area.style.opacity = "0";
+          document.body.append(area);
+          area.select();
+          document.execCommand("copy");
+          area.remove();
+        }
+        toast("Copied", "success");
+      }
+
+      function downloadText(textValue, filename, type) {
+        if (!textValue) {
+          toast("Nothing to download");
+          return;
+        }
+        const url = URL.createObjectURL(new Blob([textValue], { type }));
+        const link = node("a");
+        link.href = url;
+        link.download = filename;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+
+      function openSidebar() {
+        elements.sidebar.classList.add("open");
+        elements.backdrop.classList.add("visible");
+      }
+
+      function closeSidebar() {
+        elements.sidebar.classList.remove("open");
+        elements.backdrop.classList.remove("visible");
+      }
+
+      function toggleResources(force) {
+        const open = force === undefined ? !elements.resourcePanel.classList.contains("open") : force;
+        elements.resourcePanel.classList.toggle("open", open);
+        elements.resourceButton.setAttribute("aria-expanded", String(open));
+      }
+
+      function applySaved() {
+        if (saved.maxTokens) elements.maxTokens.value = saved.maxTokens;
+        if (saved.maxImageSide) elements.maxImageSide.value = saved.maxImageSide;
+        if (saved.doSample !== undefined) elements.doSample.checked = Boolean(saved.doSample);
+        if (saved.temperature !== undefined) elements.temperature.value = saved.temperature;
+        if (saved.topP !== undefined) elements.topP.value = saved.topP;
+        if (saved.topK !== undefined) elements.topK.value = saved.topK;
+      }
+
+      async function bootstrap() {
+        applySaved();
+        bindEvents();
+        try {
+          const [models, tasks, sessions, status, memory] = await Promise.all([
+            request("/api/models"),
+            request("/api/tasks"),
+            request("/api/sessions"),
+            request("/api/status"),
+            request("/api/memory")
+          ]);
+          state.models = collection(models, "models", "id");
+          state.tasks = collection(tasks, "tasks", "key");
+          state.sessions = collection(sessions, "sessions", "id");
+          state.sessions.sort((a, b) => Number(b.updated_at || b.created_at || 0) - Number(a.updated_at || a.created_at || 0));
+          state.status = status || {};
+          state.memory = memory || {};
+          renderModels();
+          renderTasks();
+          renderSessions();
+          renderStatus();
+          renderMemory();
+          if (state.currentSessionId && state.sessions.some(session => String(session.id) === String(state.currentSessionId))) await selectSession(state.currentSessionId);
+          else {
+            state.currentSessionId = null;
+            saveSettings();
+            renderConversation();
+          }
+        } catch (error) {
+          elements.connectionText.textContent = "Offline";
+          toast(`Startup failed: ${error.message}`, "error");
+          renderConversation();
+        }
+        updateSendState();
+        window.setInterval(() => {
+          if (!document.hidden) Promise.allSettled([refreshStatus(), refreshMemory()]);
+        }, 5000);
+      }
+
+      function bindEvents() {
+        elements.mobileMenuButton.addEventListener("click", openSidebar);
+        elements.backdrop.addEventListener("click", closeSidebar);
+        elements.newChatButton.addEventListener("click", async () => {
+          try {
+            await createSession(true);
+          } catch (error) {
+            toast(error.message, "error");
+          }
+        });
+        elements.sessionSearch.addEventListener("input", () => { state.search = elements.sessionSearch.value; renderSessions(); });
+        elements.modelSelect.addEventListener("change", () => { updatePlacements(); saveSettings(); });
+        elements.placementSelect.addEventListener("change", saveSettings);
+        elements.loadButton.addEventListener("click", () => loadModel().catch(error => toast(error.message, "error")));
+        elements.unloadButton.addEventListener("click", unloadModel);
+        elements.resetButton.addEventListener("click", resetSession);
+        elements.resourceButton.addEventListener("click", event => { event.stopPropagation(); toggleResources(); });
+        document.addEventListener("click", event => {
+          if (!elements.resourcePanel.contains(event.target) && !elements.resourceButton.contains(event.target)) toggleResources(false);
+        });
+        elements.attachButton.addEventListener("click", () => elements.fileInput.click());
+        elements.dropzone.addEventListener("click", () => elements.fileInput.click());
+        elements.dropzone.addEventListener("keydown", event => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            elements.fileInput.click();
+          }
+        });
+        elements.fileInput.addEventListener("change", () => { addFiles(elements.fileInput.files); elements.fileInput.value = ""; });
+        let dragDepth = 0;
+        window.addEventListener("dragenter", event => {
+          if (!Array.from(event.dataTransfer && event.dataTransfer.types || []).includes("Files")) return;
+          event.preventDefault();
+          dragDepth += 1;
+          showDropzone(true);
+          elements.dropzone.classList.add("dragging");
+        });
+        window.addEventListener("dragover", event => {
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+          event.preventDefault();
+        });
+        window.addEventListener("dragleave", event => {
+          event.preventDefault();
+          dragDepth = Math.max(0, dragDepth - 1);
+          if (!dragDepth) {
+            elements.dropzone.classList.remove("dragging");
+            if (!state.files.length) showDropzone(false);
+          }
+        });
+        window.addEventListener("drop", event => {
+          event.preventDefault();
+          dragDepth = 0;
+          elements.dropzone.classList.remove("dragging");
+          showDropzone(false);
+          addFiles(event.dataTransfer.files);
+        });
+        elements.sendButton.addEventListener("click", sendChat);
+        elements.stopButton.addEventListener("click", stopGeneration);
+        elements.customPrompt.addEventListener("keydown", event => {
+          if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            sendChat();
+          }
+        });
+        for (const input of [elements.maxTokens, elements.maxImageSide, elements.doSample, elements.temperature, elements.topP, elements.topK]) input.addEventListener("change", saveSettings);
+        elements.copyLiveAnswer.addEventListener("click", () => copyText(state.active.answer));
+        elements.downloadLiveAnswer.addEventListener("click", () => downloadText(state.active.answer, "qwen3-vl-answer.txt", "text/plain"));
+        elements.copyLiveReasoning.addEventListener("click", () => copyText(state.active.reasoning));
+        elements.copyStructured.addEventListener("click", () => copyText(structuredText(state.active.structured)));
+        elements.downloadStructured.addEventListener("click", () => downloadText(structuredText(state.active.structured), "qwen3-vl-result.json", "application/json"));
+        document.addEventListener("keydown", event => {
+          if (event.key === "Escape") {
+            closeSidebar();
+            toggleResources(false);
+          }
+        });
+        window.addEventListener("beforeunload", () => {
+          saveSettings();
+          for (const item of state.files) URL.revokeObjectURL(item.objectUrl);
+        });
+      }
+
+      bootstrap();
+    })();
+  </script>
+</body>
+</html>

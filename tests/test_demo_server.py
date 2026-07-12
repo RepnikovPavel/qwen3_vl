@@ -170,11 +170,14 @@ class DemoServerTest(unittest.TestCase):
         return response.json()
 
     def test_health_tasks_models_and_readiness(self):
+        index = self.client.get("/")
         health = self.client.get("/healthz")
         readiness = self.client.get("/readyz")
         models = self.client.get("/api/models")
         tasks = self.client.get("/api/tasks")
 
+        self.assertEqual(index.status_code, 200)
+        self.assertIn("Qwen3 VL FP8 Studio", index.text)
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json(), {"status": "ok"})
         self.assertEqual(readiness.status_code, 200)
