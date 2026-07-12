@@ -1,24 +1,25 @@
 {
   "schema_version": 1,
-  "created_at_utc": "2026-07-12T13:34:37Z",
+  "created_at_utc": "2026-07-12T14:05:55Z",
   "status": "complete_with_documented_limitations",
   "provenance": {
-    "report_source_git_commit": "879b0201af2ca2f1b8c95ad57250273584068669",
+    "report_source_git_commit": "b8e4d2393c9148decfee1bf2a086778162f0b81f",
     "measured_git_commit": "80881b2798bbc8f9599c38efcfb4c82a4f2a5a7f",
     "measured_runtime_source_sha256": "8014e537ba71205af712631aaa1f71eb991386a2d9ca066ae42f9af1dc24c372",
     "docker_image": {
       "measured_server_image": "qwen3-vl:2e7bf7b",
       "measured_server_image_id": "sha256:6587c008a224823fd77b67c5387542cf7c4b75a31cfbc5ffecf335ec428bba23",
       "measured_server_source_commit": "2e7bf7b29ed6248705d3335825c73437944bcee9",
-      "final_source_image": "qwen3-vl:879b020",
-      "final_source_image_id": "sha256:f4529237a8acc348860c71968155bb72397006517e3b1bad339e89af587144fa",
-      "final_source_image_size_bytes": 22250400814,
-      "final_source_image_commit": "879b0201af2ca2f1b8c95ad57250273584068669",
+      "final_source_image": "qwen3-vl:b8e4d23",
+      "final_source_image_id": "sha256:0ab9e85db3f15ae7e1168b177091f7f0a7d2179a5e93dc5d2e0b85c2b24bbc06",
+      "final_source_image_size_bytes": 22250407824,
+      "final_source_image_commit": "b8e4d2393c9148decfee1bf2a086778162f0b81f",
       "pinned_base_prefix_layers": 92,
       "total_layers": 99,
       "local_baseline_image_id": "sha256:a691216c572709481819a26180621ccebd89c2e7493a2ef4b67215c246289759",
       "dockerfile_sha256": "6262612333c8a0a93cfb2cbccf68eccbe11a619d55f8a1b407b616608e797f9a",
       "run_wrapper_sha256": "8c7a95f9abc714bc8c8fb46fd796ef00c5cb06b6607cce0c7535de39b352ca1e",
+      "parity_runner_sha256": "2b11102daad5e290c2b3c0a594141be1e9e5a0fe2fba8cd3ad9505915f3a4170",
       "requirements_sha256": "3d0273b3b277f879dcc8ff5a98cf072e491e7dd20ba2426f4ebe54757f904cbf"
     },
     "base_image": {
@@ -38,7 +39,7 @@
     "parity_scope": {
       "historical_demo_recovery": "demo_VL_2B_FP8_local.py is tracked only as a wrapper into this runtime; no earlier independent implementation exists in repository history",
       "reference": "direct Transformers model.generate compared with the runtime wrapper on the same loaded FP8 model",
-      "claim": "exact input fingerprints and generated token prefixes, not independent-binary or complete-EOS equivalence"
+      "claim": "exact input fingerprints, exact greedy prefixes, and one exact complete sampling answer; not independent-binary equivalence"
     }
   },
   "checkpoints": {
@@ -97,8 +98,8 @@
   "tests": {
     "source_with_local_checkpoints": {
       "status": "passed",
-      "run": 79,
-      "passed": 79,
+      "run": 80,
+      "passed": 80,
       "skipped": 0,
       "failures": 0,
       "errors": 0,
@@ -106,8 +107,8 @@
     },
     "image_without_checkpoint_mount": {
       "status": "passed",
-      "run": 79,
-      "passed": 72,
+      "run": 80,
+      "passed": 73,
       "skipped": 7,
       "skip_reason": "checkpoint mounts intentionally absent",
       "network": "disabled"
@@ -289,8 +290,20 @@
           "artifact_sha256": "ea712a7d4d890bc6a7c392220595346d7bd0aaf1deb951392ed8c79da6fa68be"
         },
         "gpu1": {
-          "status": "not_run",
-          "coverage": "exact_input_token_and_answer_digests_from_single_gpu_benchmark"
+          "status": "complete_eos_match",
+          "basis": "direct_generate_vs_runtime_wrapper_same_loaded_model",
+          "scope": "complete_answer",
+          "decode": "sampling",
+          "max_image_side": 1200,
+          "prompt_tokens": 987,
+          "tokens": 1374,
+          "reference_finish_reason": "eos",
+          "candidate_finish_reason": "eos",
+          "match": true,
+          "input_fingerprints_match": true,
+          "common_prefix_tokens": 1374,
+          "token_ids_sha256": "b747f1b0bcd0fdb18b85581a38f01fa8d3dcb6d6b2df8d389f30ed40e6b92b43",
+          "artifact_sha256": "64a3514525d53aac39bdc2c6a3386e48e91a753883b17f80ef564e8359b60e88"
         }
       },
       "context": {
