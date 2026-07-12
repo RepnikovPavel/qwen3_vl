@@ -125,7 +125,6 @@ docker_args=(
     --user "$(id -u):$(id -g)"
     --tmpfs /tmp:rw,nosuid,nodev,exec,size=8g,mode=1777
     --env HOME=/tmp
-    --env XDG_CACHE_HOME=/tmp/.cache
     --env TRITON_CACHE_DIR=/tmp/triton-cache
     --env HF_HOME=/models
     --env HF_HUB_CACHE=/models
