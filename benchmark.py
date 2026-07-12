@@ -156,6 +156,8 @@ def run_benchmark(args) -> dict[str, object]:
                 "generation_seconds": result.generation_seconds,
                 "total_seconds": result.total_seconds,
                 "generated_tokens": result.generated_tokens,
+                "token_ids_sha256": result.token_ids_sha256,
+                "input_fingerprints": result.input_fingerprints,
                 "prompt_tokens": result.prompt_tokens,
                 "tokens_per_second": result.tokens_per_second,
                 "finish_reason": result.finish_reason,

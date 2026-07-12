@@ -17,6 +17,7 @@ Commands:
   infer          run local single/multi-image or video inference
   web            start the local Web UI
   benchmark      benchmark one model in one process
+  parity-run     compare direct Transformers generation with the runtime
   sweep-context  find the practical context limit with isolated processes
 
 Run `qwen3-vl COMMAND --help` for command-specific options.
@@ -79,6 +80,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from benchmark import main as benchmark_main
 
         return benchmark_main(rest)
+    if command == "parity-run":
+        from reference_vl import main as parity_main
+
+        return parity_main(rest)
     if command in {"sweep-context", "context-sweep"}:
         from context_sweep import main as sweep_main
 

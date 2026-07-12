@@ -67,6 +67,7 @@ from transformers.integrations.finegrained_fp8 import FP8Linear
 
 from model_catalog import MODEL_SPECS, get_model_spec, normalize_model_size
 from download_models import verify_checkpoint
+from parity import fingerprint_tensors, token_ids_sha256
 
 
 DEFAULT_CKPT_DIR = Path("/mnt/nvme/huggingface")
@@ -106,6 +107,9 @@ class GenerationResult:
     truncated: bool
     prompt_tokens: int
     generated_tokens: int
+    token_ids: tuple[int, ...]
+    token_ids_sha256: str
+    input_fingerprints: dict[str, dict[str, object] | None]
     media_seconds: float
     preprocess_seconds: float
     generation_seconds: float
@@ -114,8 +118,11 @@ class GenerationResult:
     peak_vram_mb: float | None
     peak_vram_mb_per_device: dict[str, float] | None
 
-    def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+    def to_dict(self, include_token_ids: bool = False) -> dict[str, object]:
+        value = asdict(self)
+        if not include_token_ids:
+            value.pop("token_ids")
+        return value
 
 
 class OrderedMediaAction(argparse.Action):
@@ -555,7 +562,9 @@ def generate(
         return_tensors="pt",
         add_vision_id=len(media) > 1,
         processor_kwargs=processor_kwargs,
-    ).to(device)
+    )
+    input_fingerprints = fingerprint_tensors(inputs)
+    inputs = inputs.to(device)
     _sync(device)
     preprocess_seconds = time.perf_counter() - started
 
@@ -587,7 +596,7 @@ def generate(
 
     continuation = output.sequences[:, prompt_tokens:]
     generated_tokens = int(continuation.shape[1])
-    token_ids = continuation[0].tolist()
+    token_ids = tuple(continuation[0].tolist())
     eos_value = model.generation_config.eos_token_id
     eos_ids = {int(eos_value)} if isinstance(eos_value, int) else {int(item) for item in eos_value or []}
     ended_with_eos = bool(token_ids and token_ids[-1] in eos_ids)
@@ -621,6 +630,9 @@ def generate(
         truncated=finish_reason == "max_new_tokens",
         prompt_tokens=prompt_tokens,
         generated_tokens=generated_tokens,
+        token_ids=token_ids,
+        token_ids_sha256=token_ids_sha256(token_ids),
+        input_fingerprints=input_fingerprints,
         media_seconds=0.0,
         preprocess_seconds=preprocess_seconds,
         generation_seconds=generation_seconds,
@@ -880,6 +892,7 @@ def build_parser(device: str | None = None) -> argparse.ArgumentParser:
     parser.add_argument("--require-eos", action="store_true", help="Exit nonzero if output hits the token cap")
     parser.add_argument("--show-thinking", action="store_true")
     parser.add_argument("--json", action="store_true", help="Print structured result JSON")
+    parser.add_argument("--include-token-ids", action="store_true")
     parser.add_argument("--preflight-only", action="store_true", help="Validate local files/config only")
     parser.add_argument(
         "--verify-sha",
@@ -985,7 +998,7 @@ def main(device: str | None = None, argv: Sequence[str] | None = None) -> int:
                 }
                 for item in media
             ],
-            "result": result.to_dict(),
+            "result": result.to_dict(include_token_ids=args.include_token_ids),
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 2 if args.require_eos and result.finish_reason != "eos" else 0

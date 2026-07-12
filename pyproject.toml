@@ -18,8 +18,12 @@ py-modules = [
   "cache_fp8_kernel",
   "context_sweep",
   "download_models",
+  "evaluate_vl",
+  "generate_eval_fixtures",
   "model_catalog",
   "qwen3_vl",
   "qwen3_vl_offline",
+  "parity",
+  "reference_vl",
   "web_ui",
 ]

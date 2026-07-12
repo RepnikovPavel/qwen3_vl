@@ -12,6 +12,8 @@ Modes:
   infer-cpu      CPU-FP32 inference with network disabled
   benchmark      GPU-FP8 benchmark with network disabled
   benchmark-cpu  CPU-FP32 benchmark with network disabled
+  parity         GPU-FP8 direct-reference parity with network disabled
+  parity-cpu     CPU-FP32 direct-reference parity with network disabled
   sweep          GPU-FP8 context sweep with network disabled
   web            Web UI on host 127.0.0.1:PORT
 
@@ -86,7 +88,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${mode}" in
-    download|infer-gpu|infer-cpu|benchmark|benchmark-cpu|sweep|web) ;;
+    download|infer-gpu|infer-cpu|benchmark|benchmark-cpu|parity|parity-cpu|sweep|web) ;;
     *) usage >&2; die "unknown mode: ${mode}" ;;
 esac
 
@@ -197,6 +199,32 @@ case "${mode}" in
             --ckpt-dir /models
         )
         if [[ "${benchmark_device}" == "cuda" ]]; then
+            container_command+=(--kernel-dir "${kernel_dir}")
+        fi
+        ;;
+    parity|parity-cpu)
+        docker_args+=(
+            --network=none
+            --no-healthcheck
+            --mount "type=bind,src=${models_dir},dst=/models,readonly"
+            --mount "type=bind,src=${data_dir},dst=/data,readonly"
+            "${offline_env[@]}"
+        )
+        parity_device="cpu"
+        if [[ "${mode}" == "parity" ]]; then
+            parity_device="cuda"
+            docker_args+=(--gpus "${gpu_request}")
+        fi
+        if [[ -n "${output_dir}" ]]; then
+            docker_args+=(--mount "type=bind,src=${output_dir},dst=/output")
+        fi
+        container_command=(
+            python3 reference_vl.py
+            "${app_args[@]}"
+            --device "${parity_device}"
+            --ckpt-dir /models
+        )
+        if [[ "${parity_device}" == "cuda" ]]; then
             container_command+=(--kernel-dir "${kernel_dir}")
         fi
         ;;
