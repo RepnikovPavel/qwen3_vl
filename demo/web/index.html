@@ -540,6 +540,52 @@
       text-align: center;
     }
 
+    .proc-summary {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      margin: 12px 0 8px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .proc-summary .ours {
+      color: var(--accent-2);
+    }
+
+    .proc-summary .other {
+      color: var(--warn);
+    }
+
+    .proc-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 4px;
+      font-size: 10px;
+      line-height: 1.35;
+    }
+
+    .proc-row.ours {
+      color: var(--accent-2);
+    }
+
+    .proc-row.other {
+      color: var(--warn);
+    }
+
+    .proc-cmd {
+      margin: -2px 0 6px;
+      color: var(--dim);
+      font-size: 9px;
+      line-height: 1.35;
+      word-break: break-all;
+    }
+
     .capacity-list {
       display: grid;
       gap: 12px;
@@ -592,15 +638,15 @@
     }
 
     .conversation-shell {
-      width: min(1180px, calc(100% - 40px));
+      width: calc(100% - 24px);
       min-height: 100%;
       margin: 0 auto;
-      padding: 32px 0 38px;
+      padding: 14px 0 18px;
     }
 
     .hero {
       display: grid;
-      min-height: min(560px, calc(100vh - 280px));
+      min-height: min(280px, calc(100vh - 240px));
       place-items: center;
     }
 
@@ -756,8 +802,8 @@
     .assistant-grid,
     .generation-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1.08fr) minmax(300px, .92fr);
-      gap: 12px;
+      grid-template-columns: minmax(200px, .9fr) minmax(280px, 1.25fr) minmax(0, 1fr);
+      gap: 10px;
       margin-left: 36px;
     }
 
@@ -770,7 +816,63 @@
     }
 
     .response-pane.thinking-pane {
-      background: rgba(13, 16, 23, .76);
+      background: rgba(13, 16, 23, .82);
+      border-color: rgba(245, 189, 99, .28);
+      box-shadow: inset 0 0 0 1px rgba(245, 189, 99, .06);
+    }
+
+    .response-pane.visual-pane {
+      background: rgba(11, 14, 20, .78);
+    }
+
+    .visual-pane .pane-content {
+      display: flex;
+      min-height: 180px;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+      font-family: inherit;
+    }
+
+    .visual-pane .pane-content figure {
+      overflow: hidden;
+      flex: 1 1 auto;
+      min-height: 120px;
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #07090d;
+    }
+
+    .visual-pane .pane-content img,
+    .visual-pane .pane-content video {
+      display: block;
+      width: 100%;
+      max-height: min(52vh, 520px);
+      object-fit: contain;
+      background: #05070a;
+    }
+
+    .visual-pane .pane-content figcaption {
+      overflow: hidden;
+      padding: 6px 8px;
+      color: var(--muted);
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .visual-empty {
+      display: grid;
+      flex: 1;
+      place-items: center;
+      min-height: 120px;
+      padding: 12px;
+      border: 1px dashed var(--line);
+      border-radius: 10px;
+      color: var(--dim);
+      font-size: 11px;
+      text-align: center;
     }
 
     .pane-head {
@@ -810,8 +912,8 @@
     }
 
     .pane-content {
-      min-height: 110px;
-      max-height: 540px;
+      min-height: 140px;
+      max-height: min(72vh, 820px);
       overflow: auto;
       padding: 14px;
       white-space: pre-wrap;
@@ -1314,6 +1416,18 @@
       }
     }
 
+    @media (max-width: 1100px) {
+      .assistant-grid,
+      .generation-grid {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+      }
+
+      .assistant-grid .visual-pane,
+      .generation-grid .visual-pane {
+        grid-column: 1 / -1;
+      }
+    }
+
     @media (max-width: 900px) {
       .assistant-grid,
       .generation-grid {
@@ -1321,7 +1435,7 @@
       }
 
       .pane-content {
-        max-height: 420px;
+        max-height: min(58vh, 520px);
       }
     }
 
@@ -1473,7 +1587,7 @@
       }
 
       .hero {
-        min-height: 360px;
+        min-height: 220px;
       }
 
       .hero-pills {
@@ -1562,7 +1676,7 @@
               <div class="hero-inner">
                 <div class="hero-orb" aria-hidden="true">VL</div>
                 <h1>Read the visual world</h1>
-                <p>Drop images or video, choose a focused task, and inspect the answer and model reasoning side by side.</p>
+                <p>Drop images or video, choose a focused task, and inspect the visual input, reasoning, and answer in three columns.</p>
                 <div class="hero-pills" aria-hidden="true">
                   <span class="hero-pill">Visual description</span>
                   <span class="hero-pill">OCR</span>
@@ -1576,13 +1690,17 @@
               <div class="generation-top"><span class="pulse"></span><span class="generation-label">Qwen3 VL</span><span class="generation-stage" id="generationStage">Preparing</span></div>
               <div class="live-metrics" id="liveMetrics"></div>
               <div class="generation-grid">
-                <section class="response-pane">
-                  <div class="pane-head"><span>Chat</span><div class="pane-actions"><button class="pane-action" id="copyLiveAnswer" type="button" aria-label="Copy answer">⧉</button><button class="pane-action" id="downloadLiveAnswer" type="button" aria-label="Download answer">↓</button></div></div>
-                  <div class="pane-content" id="liveAnswer"><span class="pane-placeholder">Answer tokens will appear here</span></div>
+                <section class="response-pane visual-pane">
+                  <div class="pane-head"><span>Visual</span></div>
+                  <div class="pane-content" id="liveVisual"><span class="visual-empty">Attached images or video for this request</span></div>
                 </section>
                 <section class="response-pane thinking-pane">
                   <div class="pane-head"><span>Thinking</span><div class="pane-actions"><button class="pane-action" id="copyLiveReasoning" type="button" aria-label="Copy reasoning">⧉</button></div></div>
                   <div class="pane-content" id="liveReasoning"><span class="pane-placeholder">Reasoning tokens will appear here</span></div>
+                </section>
+                <section class="response-pane">
+                  <div class="pane-head"><span>Chat</span><div class="pane-actions"><button class="pane-action" id="copyLiveAnswer" type="button" aria-label="Copy answer">⧉</button><button class="pane-action" id="downloadLiveAnswer" type="button" aria-label="Download answer">↓</button></div></div>
+                  <div class="pane-content" id="liveAnswer"><span class="pane-placeholder">Answer tokens will appear here</span></div>
                 </section>
               </div>
               <section class="structured" id="structuredPanel" hidden>
@@ -1666,6 +1784,7 @@
         liveMetrics: $("liveMetrics"),
         liveAnswer: $("liveAnswer"),
         liveReasoning: $("liveReasoning"),
+        liveVisual: $("liveVisual"),
         structuredPanel: $("structuredPanel"),
         structuredContent: $("structuredContent"),
         copyLiveAnswer: $("copyLiveAnswer"),
@@ -2134,6 +2253,16 @@
         }
       }
 
+      function visualMediaForAssistant(session, messageIndex) {
+        const messages = Array.isArray(session.messages) ? session.messages : [];
+        for (let index = messageIndex - 1; index >= 0; index -= 1) {
+          if (String(messages[index].role).toLowerCase() === "user") {
+            return mediaForMessage(session, messages[index], index);
+          }
+        }
+        return [];
+      }
+
       function mediaForMessage(session, message, index) {
         const embedded = Array.isArray(message.media) ? message.media : Array.isArray(message.attachments) ? message.attachments : [];
         if (embedded.length) return [...embedded];
@@ -2187,17 +2316,22 @@
         const reasoning = String(first(message, ["reasoning", "thinking"], ""));
         if (assistant) {
           const grid = node("div", "assistant-grid");
-          grid.append(responsePane("Chat", content || "No answer returned", false), responsePane("Thinking", reasoning || "No reasoning recorded", true));
+          const visualMedia = visualMediaForAssistant(session, index);
+          grid.append(
+            visualPane(visualMedia),
+            responsePane("Thinking", reasoning || "No reasoning recorded", true),
+            responsePane("Chat", content || "No answer returned", false)
+          );
           wrapper.append(grid);
         } else {
           wrapper.append(node("div", "message-body", content));
-        }
-        const media = mediaForMessage(session, message, index);
-        if (Array.isArray(message.localMedia)) media.push(...message.localMedia);
-        if (media.length) {
-          const gallery = node("div", "message-media");
-          for (const item of media) gallery.append(mediaElement(item, item.objectUrl));
-          wrapper.append(gallery);
+          const media = mediaForMessage(session, message, index);
+          if (Array.isArray(message.localMedia)) media.push(...message.localMedia);
+          if (media.length) {
+            const gallery = node("div", "message-media");
+            for (const item of media) gallery.append(mediaElement(item, item.objectUrl));
+            wrapper.append(gallery);
+          }
         }
         const storedMetrics = message.metrics || message.result || {};
         const metrics = storedMetrics.generation || storedMetrics.result || storedMetrics;
@@ -2210,6 +2344,22 @@
         const structured = first(message, ["structured", "structured_output"], first(storedMetrics, ["structured", "structured_output"], null));
         if (assistant && structured !== null && structured !== undefined) wrapper.append(structuredBlock(structured));
         return wrapper;
+      }
+
+      function visualPane(mediaItems) {
+        const pane = node("section", "response-pane visual-pane");
+        const head = node("div", "pane-head");
+        head.append(node("span", "", "Visual"));
+        pane.append(head);
+        const body = node("div", "pane-content");
+        const items = Array.isArray(mediaItems) ? mediaItems : [];
+        if (!items.length) {
+          body.append(node("div", "visual-empty", "No visual input for this answer"));
+        } else {
+          for (const item of items) body.append(mediaElement(item, item.objectUrl));
+        }
+        pane.append(body);
+        return pane;
       }
 
       function responsePane(title, content, thinking) {
@@ -2424,10 +2574,14 @@
         for (const gpu of gpus) {
           const usedBytes = Number(gpu.used_bytes || 0);
           const totalBytes = Number(gpu.total_bytes || 0);
+          const freeBytes = Number.isFinite(Number(gpu.free_bytes)) ? Number(gpu.free_bytes) : Math.max(0, totalBytes - usedBytes);
           const ratio = totalBytes > 0 ? Math.min(100, Math.max(0, usedBytes / totalBytes * 100)) : 0;
           const row = node("div", "gpu-row");
           const labels = node("div", "gpu-labels");
-          labels.append(node("span", "gpu-name", `GPU ${gpu.index} · ${gpu.name || "NVIDIA"}`), node("span", "gpu-value", `${readableBytes(usedBytes)} / ${readableBytes(totalBytes)}`));
+          labels.append(
+            node("span", "gpu-name", `GPU ${gpu.index} · ${gpu.name || "NVIDIA"}`),
+            node("span", "gpu-value", `${readableBytes(usedBytes)} / ${readableBytes(totalBytes)} · free ${readableBytes(freeBytes)}`)
+          );
           const bar = node("div", "bar");
           const fill = node("div", "bar-fill");
           fill.style.width = `${ratio}%`;
@@ -2439,6 +2593,27 @@
             row.append(node("div", "session-meta", `Process ${readableBytes(allocated)} allocated · ${readableBytes(reserved)} reserved`));
           }
           elements.gpuList.append(row);
+        }
+        const processes = Array.isArray(memory.processes) ? [...memory.processes].sort((a, b) => Number(b.used_bytes || 0) - Number(a.used_bytes || 0)) : [];
+        if (processes.length) {
+          const ours = Number(memory.ours_vram_bytes || 0);
+          const other = Number(memory.other_vram_bytes || 0);
+          const summary = node("div", "proc-summary");
+          summary.append(node("span", "ours", `ours ${readableBytes(ours)}`), node("span", "other", `other ${readableBytes(other)}`));
+          elements.gpuList.append(summary);
+          for (const proc of processes) {
+            const tag = proc.ours ? "[ours]" : "[other]";
+            const row = node("div", `proc-row${proc.ours ? " ours" : " other"}`);
+            row.append(
+              node("span", "", `${tag} PID ${proc.pid} · GPU ${proc.gpu}`),
+              node("span", "", readableBytes(proc.used_bytes))
+            );
+            elements.gpuList.append(row);
+            if (proc.cmd) elements.gpuList.append(node("div", "proc-cmd", String(proc.cmd).slice(0, 96)));
+          }
+        }
+        if (memory.loaded && memory.model_id) {
+          elements.gpuList.append(node("div", "session-meta", `loaded model: ${memory.model_id}`));
         }
       }
 
@@ -2658,9 +2833,28 @@
         announce(message || "Generation failed");
       }
 
+      function renderLiveVisual() {
+        const target = elements.liveVisual;
+        const items = state.files || [];
+        target.replaceChildren();
+        if (!items.length) {
+          target.append(node("div", "visual-empty", "Attached images or video for this request"));
+          return;
+        }
+        for (const item of items) {
+          const media = {
+            media_type: item.file.type,
+            mime_type: item.file.type,
+            original_name: item.file.name,
+          };
+          target.append(mediaElement(media, item.objectUrl));
+        }
+      }
+
       function renderActive() {
         const active = state.active;
         elements.generationStage.textContent = active.stage;
+        renderLiveVisual();
         renderTokenArea(elements.liveAnswer, active.answer, "Answer tokens will appear here");
         renderTokenArea(elements.liveReasoning, active.reasoning, "Reasoning tokens will appear here", { paragraphs: true });
         elements.liveMetrics.replaceChildren();

@@ -88,6 +88,18 @@ class DemoModelManagerTest(unittest.TestCase):
         self.assertEqual(status["context_tokens"], 262144)
         self.assertEqual(status["device_map"], {"model": 0})
 
+    @mock.patch("demo.model_manager._gpu_processes")
+    def test_memory_reports_process_breakdown(self, mock_processes):
+        mock_processes.return_value = [
+            {"pid": 100, "gpu": 0, "used_bytes": 1024, "ours": True, "cmd": "python demo"},
+            {"pid": 200, "gpu": 1, "used_bytes": 2048, "ours": False, "cmd": "other"},
+        ]
+        memory = self.manager.memory()
+        self.assertEqual(memory["ours_vram_bytes"], 1024)
+        self.assertEqual(memory["other_vram_bytes"], 2048)
+        self.assertEqual(len(memory["processes"]), 2)
+        self.assertFalse(memory["loaded"])
+
     @mock.patch.object(DemoModelManager, "_visible_gpu_count", return_value=2)
     def test_models_expose_only_catalogued_fp8_checkpoints(self, _count):
         root = Path(self.temporary.name)

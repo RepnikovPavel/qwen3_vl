@@ -122,6 +122,73 @@ def _estimate_token_headroom(
     return estimate, bottleneck
 
 
+def _gpu_processes() -> list[dict[str, Any]]:
+    """Per-process GPU memory: flag demo PID as ours vs other workloads."""
+    import subprocess
+
+    our_pid = os.getpid()
+    try:
+        uuids = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"],
+            text=True,
+            timeout=10,
+        ).strip().splitlines()
+        idx_to_uuid = {}
+        for line in uuids:
+            idx, uuid = [part.strip() for part in line.split(",", 1)]
+            idx_to_uuid[uuid] = int(idx)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        idx_to_uuid = {}
+
+    try:
+        out = subprocess.check_output(
+            [
+                "nvidia-smi",
+                "--query-compute-apps=gpu_uuid,pid,process_name,used_memory",
+                "--format=csv,noheader,nounits",
+            ],
+            text=True,
+            timeout=10,
+        ).strip().splitlines()
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+    from human_size import mib_to_bytes
+
+    procs: list[dict[str, Any]] = []
+    for line in out:
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 4:
+            continue
+        uuid, pid_s, name, mem_s = parts[:4]
+        try:
+            pid = int(pid_s)
+            mem_mib = float(mem_s.replace("MiB", "").strip())
+            mem_bytes = mib_to_bytes(mem_mib)
+        except ValueError:
+            continue
+        gpu_idx = idx_to_uuid.get(uuid, -1)
+        cmd = name
+        try:
+            cmd = subprocess.check_output(
+                ["ps", "-o", "cmd=", "-p", str(pid)],
+                text=True,
+                timeout=5,
+            ).strip()[:120]
+        except (OSError, subprocess.SubprocessError):
+            pass
+        procs.append(
+            {
+                "pid": pid,
+                "gpu": gpu_idx,
+                "used_bytes": mem_bytes,
+                "ours": pid == our_pid,
+                "cmd": cmd,
+            }
+        )
+    return procs
+
+
 def _current_rss_bytes() -> int:
     try:
         for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
@@ -409,6 +476,12 @@ class DemoModelManager:
             estimate, bottleneck = _estimate_token_headroom(runtime, gpus)
         except (AttributeError, KeyError, TypeError, ValueError, RuntimeError):
             estimate, bottleneck = None, None
+        with self._state_lock:
+            loaded = self._runtime is not None
+            model_id = self._model_size
+        processes = _gpu_processes()
+        ours_bytes = sum(item["used_bytes"] for item in processes if item["ours"])
+        other_bytes = sum(item["used_bytes"] for item in processes if not item["ours"])
         return {
             "rss_bytes": _current_rss_bytes(),
             "gpus": gpus,
@@ -419,6 +492,11 @@ class DemoModelManager:
                 if estimate is not None
                 else None
             ),
+            "loaded": loaded,
+            "model_id": model_id,
+            "processes": processes,
+            "ours_vram_bytes": ours_bytes,
+            "other_vram_bytes": other_bytes,
         }
 
     def _unload_locked(self) -> bool:
