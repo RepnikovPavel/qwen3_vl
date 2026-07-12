@@ -1,0 +1,403 @@
+{
+  "schema_version": 1,
+  "created_at_utc": "2026-07-12T13:34:37Z",
+  "status": "complete_with_documented_limitations",
+  "provenance": {
+    "report_source_git_commit": "879b0201af2ca2f1b8c95ad57250273584068669",
+    "measured_git_commit": "80881b2798bbc8f9599c38efcfb4c82a4f2a5a7f",
+    "measured_runtime_source_sha256": "8014e537ba71205af712631aaa1f71eb991386a2d9ca066ae42f9af1dc24c372",
+    "docker_image": {
+      "measured_server_image": "qwen3-vl:2e7bf7b",
+      "measured_server_image_id": "sha256:6587c008a224823fd77b67c5387542cf7c4b75a31cfbc5ffecf335ec428bba23",
+      "measured_server_source_commit": "2e7bf7b29ed6248705d3335825c73437944bcee9",
+      "final_source_image": "qwen3-vl:879b020",
+      "final_source_image_id": "sha256:f4529237a8acc348860c71968155bb72397006517e3b1bad339e89af587144fa",
+      "final_source_image_size_bytes": 22250400814,
+      "final_source_image_commit": "879b0201af2ca2f1b8c95ad57250273584068669",
+      "pinned_base_prefix_layers": 92,
+      "total_layers": 99,
+      "local_baseline_image_id": "sha256:a691216c572709481819a26180621ccebd89c2e7493a2ef4b67215c246289759",
+      "dockerfile_sha256": "6262612333c8a0a93cfb2cbccf68eccbe11a619d55f8a1b407b616608e797f9a",
+      "run_wrapper_sha256": "8c7a95f9abc714bc8c8fb46fd796ef00c5cb06b6607cce0c7535de39b352ca1e",
+      "requirements_sha256": "3d0273b3b277f879dcc8ff5a98cf072e491e7dd20ba2426f4ebe54757f904cbf"
+    },
+    "base_image": {
+      "name": "nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc20",
+      "manifest_digest": "sha256:1532b38814b3faf2affdb5ef01ca91468685d314ffb7e8926a0567595355ed88",
+      "local_image_id": "sha256:a5f07c8ff0257109878c23c8fcf3147b2c9e9eddb9c182cecca8465cd59025fa"
+    },
+    "fp8_kernel_sha256": "a4cba5ebd6dd2bed606ea63ad59e2f92284e9de00f1560479e3294828bc22a18",
+    "software": {
+      "torch": "2.11.0a0+eb65b36914.nv26.2",
+      "transformers": "5.5.4",
+      "accelerate": "1.14.0",
+      "kernels": "0.14.1",
+      "safetensors": "0.8.0",
+      "cuda_runtime": "13.1"
+    },
+    "parity_scope": {
+      "historical_demo_recovery": "demo_VL_2B_FP8_local.py is tracked only as a wrapper into this runtime; no earlier independent implementation exists in repository history",
+      "reference": "direct Transformers model.generate compared with the runtime wrapper on the same loaded FP8 model",
+      "claim": "exact input fingerprints and generated token prefixes, not independent-binary or complete-EOS equivalence"
+    }
+  },
+  "checkpoints": {
+    "2b": {
+      "repo_id": "Qwen/Qwen3-VL-2B-Thinking-FP8",
+      "revision": "bc71e10812c1bba5532bd2eca46a4166f3b7fffd",
+      "expected_tensors": 822,
+      "expected_fp8_scales": 196,
+      "config_sha256": "9d3050de5482d3ba017c945bea8cf94fc0bee7f0bd272e3abeeeb502774c9601",
+      "index_sha256": "59beb5fdb25290b2efa4c7c16c3b081d45bff7635c5703caa89078ec71c68d46",
+      "weight_shards": [
+        {
+          "size_bytes": 3468553776,
+          "sha256": "327bc29770e4e1f1f73e14b849b0ed6856639d3fa11f4525aacf353a1394ab98"
+        }
+      ]
+    },
+    "4b": {
+      "repo_id": "Qwen/Qwen3-VL-4B-Thinking-FP8",
+      "revision": "219b8e195ea30e383c55c954278767990974bba9",
+      "expected_tensors": 966,
+      "expected_fp8_scales": 252,
+      "config_sha256": "48bc97743d741920de3455f7a6f0a807b0c3ae692e662a0864f188ca528f92b2",
+      "index_sha256": "94c659b1e64a2e3f23e83e6392ee0961152902e7871da74e867c1bd826e2a761",
+      "weight_shards": [
+        {
+          "size_bytes": 5366863440,
+          "sha256": "c29f37dacc3e40f1579166d1f74bf406d2b2800fad149e9e8ac5219e801d4862"
+        },
+        {
+          "size_bytes": 654372016,
+          "sha256": "be6fe6b2564e3211acf15427244662973e37c9b872cfdf130ed9d1917bb20dfa"
+        }
+      ]
+    },
+    "8b": {
+      "repo_id": "Qwen/Qwen3-VL-8B-Thinking-FP8",
+      "revision": "a6638e84662f85a17bb8688224541e153d4f6c71",
+      "expected_tensors": 1002,
+      "expected_fp8_scales": 252,
+      "full_manifest_and_sha256_verification": true,
+      "config_sha256": "8bbb7d41e722c000d4079c2520fd7d8438a5c13cf084c89784c0a2770cc9bf88",
+      "index_sha256": "751e4b7c17b148d5cc8fb1296b281fe98a711c0182d88b8516f459186990f49d",
+      "weight_shards": [
+        {
+          "size_bytes": 5363407552,
+          "sha256": "48c85cea60c7b445addf0ae150041b97298fb20a63e2149d9612ede9f0a1e2db"
+        },
+        {
+          "size_bytes": 5226891960,
+          "sha256": "642f60b06b2cf0896ef177fdfd295eb98aec998a0f4b9ae06422a3789ac20f3c"
+        }
+      ]
+    }
+  },
+  "tests": {
+    "source_with_local_checkpoints": {
+      "status": "passed",
+      "run": 79,
+      "passed": 79,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "network": "disabled"
+    },
+    "image_without_checkpoint_mount": {
+      "status": "passed",
+      "run": 79,
+      "passed": 72,
+      "skipped": 7,
+      "skip_reason": "checkpoint mounts intentionally absent",
+      "network": "disabled"
+    }
+  },
+  "inputs": {
+    "image_sha256": "05677d294a5a37b167d29789fa1de89ddfc0b4e18810cf5fa1a6f07e6dba8dfb",
+    "benchmark_prompt_sha256": "1945ad4768bbd4cf3eb4e5bf7c27e66af842d226ca8cf29c6fcfeb77ade18348",
+    "parity_prompt_sha256": "739b913904d813498bd9113db092ac8aee8f1be80c0dfb5f96a839b514da6768",
+    "raw_content_included": false
+  },
+  "local": {
+    "hardware": {
+      "gpu": "NVIDIA GeForce RTX 4070 Ti",
+      "compute_capability": "8.9",
+      "vram_mb": 11872.12,
+      "cpu_architecture": "x86_64"
+    },
+    "2b": {
+      "benchmark": {
+        "scope": "eight_token_greedy_prefix",
+        "settings": {
+          "max_image_side": 224,
+          "max_new_tokens": 8,
+          "prompt_tokens": 86,
+          "seed": 0,
+          "warmup_runs": 1,
+          "measured_runs": 3
+        },
+        "cpu_fp32": {
+          "load_seconds": 3.849669661000007,
+          "generation_seconds_median": 4.810130185000162,
+          "generation_seconds_p95": 4.986317468999914,
+          "total_seconds_median": 4.8332807820006565,
+          "tokens_per_second_median": 1.6631566490543397,
+          "threads": 16,
+          "artifact_sha256": "eb3fcceac0724af2f1a7073b9424d566e45bfa269166a38951d12e684facab89"
+        },
+        "gpu_fp8": {
+          "load_seconds": 9.89151875800053,
+          "generation_seconds_median": 0.44014326599972264,
+          "generation_seconds_p95": 0.45569424399946,
+          "total_seconds_median": 0.4542420369998581,
+          "tokens_per_second_median": 18.175900026163394,
+          "peak_vram_mb": 2743.53662109375,
+          "artifact_sha256": "1151f567b8a7d11f4fb5c30193b880870cf2b9f6f93d692f5d735f6ed99f0fde"
+        },
+        "comparison": {
+          "input_fingerprints_match": true,
+          "token_ids_sha256": "48f9df7aee8822f84805473505339c4bd020b8ac1b7bf589685d926845300d4c",
+          "token_ids_match": true,
+          "answer_sha256": "9d3798ac66928414538af39f78f6804a915278f276dfba6a6743996bda950113",
+          "answer_digest_match": true,
+          "gpu_generation_speedup": 10.92855566942422,
+          "finished_eos": false
+        }
+      },
+      "direct_reference_parity": {
+        "cpu_fp32": {
+          "scope": "generated_prefix",
+          "max_image_side": 224,
+          "tokens": 8,
+          "match": true,
+          "token_ids_sha256": "a98013f81b80841392850ddade0f018d9ab75f6eb4197486c2b5cdf4222155a9",
+          "artifact_sha256": "dc58ad1b739673fe71082c3b28e7959f2b58e8073fbfcc2a664b190c53d6be7b"
+        },
+        "gpu_fp8": {
+          "scope": "generated_prefix",
+          "max_image_side": 320,
+          "tokens": 16,
+          "match": true,
+          "token_ids_sha256": "a8467e2d699f94bbf991dc25dcaede6bd9ff5acc39b79dd470312f65d5d1fae4",
+          "artifact_sha256": "f7962f06a1b0d4281e2bac73907387dfee4687d63d1ef186f9b54c627ed901bf",
+          "schema_note": "legacy_without_proof_basis"
+        }
+      }
+    },
+    "4b": {
+      "direct_reference_parity": {
+        "device_mode": "gpu_fp8",
+        "basis": "direct_generate_vs_runtime_wrapper_same_loaded_model",
+        "scope": "generated_prefix",
+        "max_image_side": 224,
+        "tokens": 8,
+        "match": true,
+        "token_ids_sha256": "d71db27d5252408a00bac01f54ebfd306419e121ad99a4fb389e360c22b42263",
+        "artifact_sha256": "201c0f2702e7a11feb5a6e508b3164518a8e9b47ff8846da2195fd1ec6ba814f"
+      }
+    }
+  },
+  "server": {
+    "hardware": {
+      "gpus": 2,
+      "gpu_model": "NVIDIA GeForce RTX 5060 Ti",
+      "compute_capability": "12.0",
+      "vram_mb_per_gpu": 15847.94,
+      "p2p": false,
+      "co_resident_gpu_process_preserved": true,
+      "co_resident_memory_observed_mb_near_context_end": {
+        "gpu0": 2098,
+        "gpu1": 1768
+      }
+    },
+    "8b": {
+      "benchmark": {
+        "scope": "sixty_four_token_greedy_prefix",
+        "settings": {
+          "max_image_side": 320,
+          "max_new_tokens": 64,
+          "prompt_tokens": 86,
+          "seed": 0,
+          "warmup_runs": 1,
+          "measured_runs": 3
+        },
+        "gpu0_single": {
+          "load_seconds": 2.958746313001029,
+          "generation_seconds_median": 4.61581465206109,
+          "generation_seconds_p95": 4.638397259055637,
+          "total_seconds_median": 4.6350272910203785,
+          "tokens_per_second_median": 13.865374765735496,
+          "peak_vram_mb": 10134.35791015625,
+          "artifact_sha256": "07e159dc2a6845613de050aa26822ddff5e4af4897d01e4bb8c3654505089d6a"
+        },
+        "gpu1_single": {
+          "load_seconds": 2.9693634799914435,
+          "generation_seconds_median": 4.633939936989918,
+          "generation_seconds_p95": 4.635419799014926,
+          "total_seconds_median": 4.652702799998224,
+          "tokens_per_second_median": 13.81114146282454,
+          "peak_vram_mb": 10134.35791015625,
+          "artifact_sha256": "5c6106004670e321a1e19f1b6f15221298b4a56b5009380b9dc2e02ebb4669eb"
+        },
+        "balanced_2gpu": {
+          "load_seconds": 3.171970088966191,
+          "generation_seconds_median": 5.297666722908616,
+          "generation_seconds_p95": 5.335807908908464,
+          "total_seconds_median": 5.316797156003304,
+          "tokens_per_second_median": 12.080790156777098,
+          "peak_vram_mb_per_device": {
+            "0": 3969.12548828125,
+            "1": 6182.970703125
+          },
+          "generation_time_ratio_vs_gpu0": 1.1477208515170902,
+          "placement": {
+            "gpu0": "vision, embeddings, language layers 0-8",
+            "gpu1": "language layers 9-35, norm, rotary, lm_head"
+          },
+          "artifact_sha256": "69bf36b084d8612493804e4904d48e1133a0a520143463675387c0189dcf13f6"
+        },
+        "two_independent_workers_concurrent": {
+          "gpu0_tokens_per_second_median": 13.894257759048212,
+          "gpu1_tokens_per_second_median": 13.993014991648687,
+          "combined_tokens_per_second": 27.8872727506969,
+          "gpu0_throughput_ratio_vs_isolated": 1.0020831022457535,
+          "gpu1_throughput_ratio_vs_isolated": 1.0131686095109298,
+          "token_and_answer_digests_match": true,
+          "gpu0_artifact_sha256": "1affdbf6b07430330d773e1107e713351a804c3c40dfc7bbedfe78dd3722a756",
+          "gpu1_artifact_sha256": "540870b81d22ef0bfae5e85e52ef551ac38b8dae27854cf9df6f095319980d7a"
+        },
+        "comparison": {
+          "input_fingerprints_match_all_modes": true,
+          "token_ids_sha256": "b5947ee390d7e1fcb95ae044795cd05169d456ccdfc7e36d69b6ff315b3a3fae",
+          "token_ids_match_all_modes": true,
+          "answer_sha256": "13751c7f8125fc405ef12ba84c10420963d9d05023d5aa6c3676a32770a7f98b",
+          "answer_digest_match_all_modes": true,
+          "finished_eos": false
+        }
+      },
+      "direct_reference_parity": {
+        "gpu0": {
+          "basis": "direct_generate_vs_runtime_wrapper_same_loaded_model",
+          "scope": "generated_prefix",
+          "max_image_side": 320,
+          "tokens": 64,
+          "match": true,
+          "input_fingerprints_match": true,
+          "common_prefix_tokens": 64,
+          "token_ids_sha256": "93899f1b10b2b7b7a84bef12deed330273d4f43bdddefc2b6575118490b60f73",
+          "artifact_sha256": "ea712a7d4d890bc6a7c392220595346d7bd0aaf1deb951392ed8c79da6fa68be"
+        },
+        "gpu1": {
+          "status": "not_run",
+          "coverage": "exact_input_token_and_answer_digests_from_single_gpu_benchmark"
+        }
+      },
+      "context": {
+        "single_gpu1": {
+          "status": "vram_bounded",
+          "context_mode": "native_256k",
+          "configured_max_tokens": 32768,
+          "reserve_tokens": 8,
+          "resolution_tokens": 2048,
+          "largest_success_target": 8192,
+          "largest_success_prompt_tokens": 8192,
+          "first_failure_target": 10240,
+          "failure_type": "OutOfMemoryError",
+          "peak_allocated_mb_at_largest_success": 12102,
+          "artifact_sha256": "e90469828d4e531c9a38facccdb9b66ad16c9161e6b9ee69b9f07f9a9a991349"
+        },
+        "balanced_2gpu": {
+          "status": "vram_bounded",
+          "context_mode": "native_256k",
+          "configured_max_tokens": 65536,
+          "reserve_tokens": 8,
+          "resolution_tokens": 4096,
+          "largest_success_target": 32768,
+          "largest_success_prompt_tokens": 32768,
+          "first_failure_target": 36864,
+          "failure_type": "OutOfMemoryError",
+          "peak_allocated_mb_per_device_at_largest_success": {
+            "gpu0": 8455.97,
+            "gpu1": 12710.04
+          },
+          "peak_reserved_mb_per_device_at_largest_success": {
+            "gpu0": 9224,
+            "gpu1": 13950
+          },
+          "inference_seconds_at_largest_success": 85.19451483397279,
+          "co_resident_gpu_process_present": true,
+          "artifact_sha256": "a17a012c4bbb2a066d9a2cac1294b2af3346ca411ad643fd36c4f7dceade83d8"
+        }
+      },
+      "nuscenes_six_camera": {
+        "sample_token": "ca9a282c9e77460f8360f564131a8af5",
+        "camera_count": 6,
+        "source": "v1.0-mini raw camera samples",
+        "input_size_per_camera": [1600, 900],
+        "processed_size_per_camera": [512, 288],
+        "prompt_tokens": 974,
+        "generated_tokens": 2048,
+        "finish_reason": "max_new_tokens",
+        "generation_seconds": 177.079,
+        "tokens_per_second": 11.565,
+        "quality_note": "coherent camera-by-camera traffic, road, hazard and cross-view analysis, but no EOS at 1024, 1536 or 2048 tokens",
+        "artifact_sha256": "43f6984378628c837b32d615f681ce9fd803f40202cf6cbdf8a965bdd01cf5d6"
+      }
+    }
+  },
+  "ocr": {
+    "status": "measured_with_schema_and_completion_failures",
+    "model": "Qwen/Qwen3-VL-8B-Thinking-FP8",
+    "device_mode": "gpu_fp8",
+    "settings": {
+      "max_image_side": 1200,
+      "max_new_tokens": 2048,
+      "seed": 0,
+      "do_sample": true,
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20
+    },
+    "fixtures": 4,
+    "strict_schema_valid": 1,
+    "strict_schema_valid_rate": 0.25,
+    "narrow_recovery_applied": 2,
+    "narrow_recovery_rate": 0.5,
+    "text": {
+      "characters": 261,
+      "character_errors": 1,
+      "cer": 0.0038314176245210726,
+      "wer": 0.02040816326530612,
+      "error": "one Cyrillic character substitution"
+    },
+    "formula": {
+      "strict_schema_valid": false,
+      "recovery": "escape_latex_backslashes",
+      "predicted_count": 4,
+      "normalized_exact_rate": 0.5,
+      "token_edit_similarity_mean": 0.95,
+      "syntax_valid_rate": 1
+    },
+    "line_bar_chart": {
+      "strict_schema_valid": false,
+      "recovery": "alias_numeric_values_to_values",
+      "chart_type_exact_rate": 1,
+      "label_exact_rate": 1,
+      "numeric_within_tolerance_rate": 1,
+      "numeric_mae": 0,
+      "fact_f1": 0
+    },
+    "scatter_heatmap_chart": {
+      "strict_schema_valid": false,
+      "recovery": null,
+      "finish_reason_at_4096": "max_new_tokens",
+      "response_type": "truncated_reasoning_prose",
+      "semantic_structured_metrics": 0
+    },
+    "manifest_sha256": "64e0eb1b211b27c046ee9ac31d8a84f4cc4c82893aa8a076c4ab8b6deb246537",
+    "responses_sha256": "07edeabf7437d9ccfb831d0ba682b7995848206511bd6def6f0cb1773c5bdec0",
+    "metrics_artifact_sha256": "dc684fa3b6fc3b6ce240b5b35a6adf1f7b277d4d7b66c95498a92370b469d94b",
+    "raw_answers_included": false
+  }
+}
