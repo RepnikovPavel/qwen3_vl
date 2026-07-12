@@ -106,9 +106,9 @@ def _estimate_token_headroom(
         allocated_mib = float(gpu["process_allocated_mib"])
         reserved_mib = float(gpu["process_reserved_mib"])
         reusable_mib = max(0.0, reserved_mib - allocated_mib)
-        safety_mib = max(3072.0, total_mib * 0.15)
+        safety_mib = max(1024.0, total_mib * 0.08)
         usable_bytes = max(0.0, free_mib + reusable_mib - safety_mib) * 1024**2
-        growth_bytes = per_layer_bytes * layer_count * 2.0
+        growth_bytes = per_layer_bytes * layer_count * 2.25
         estimates[index] = int(usable_bytes / growth_bytes)
         gpu["kv_layers"] = layer_count
         gpu["estimated_additional_tokens"] = estimates[index]
