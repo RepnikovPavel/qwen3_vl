@@ -15,12 +15,9 @@ mkdir -p "${state_dir}"
 models_dir="$(cd "${models_dir}" && pwd -P)"
 state_dir="$(cd "${state_dir}" && pwd -P)"
 
-if docker container inspect "${container_name}" >/dev/null 2>&1; then
-    echo "container already exists: ${container_name}" >&2
-    exit 2
-fi
+docker rm -f "${container_name}" >/dev/null 2>&1 || true
 
-exec docker run -d \
+docker run -d \
     --name "${container_name}" \
     --restart unless-stopped \
     --init \
@@ -51,3 +48,6 @@ exec docker run -d \
     --mount "type=bind,src=${state_dir},dst=/state" \
     "${image_name}" \
     python3 -m demo.server
+
+echo "demo started: docker logs -f ${container_name}"
+echo "open http://127.0.0.1:${port} or ssh -N -L ${port}:127.0.0.1:${port} ..."

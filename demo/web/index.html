@@ -825,6 +825,24 @@
       overscroll-behavior: contain;
     }
 
+    .thinking-pane .pane-content,
+    .thinking-stream-body {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .think-paragraph {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.6;
+    }
+
+    .think-paragraph:last-child {
+      color: var(--warn);
+    }
+
     .thinking-pane .pane-content {
       color: #a9b1c0;
     }
@@ -1817,18 +1835,35 @@
 
       function readableBytes(bytes) {
         const value = Number(bytes);
-        if (!Number.isFinite(value) || value < 0) return "";
-        if (value < 1024) return `${value} B`;
-        if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-        if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
-        return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
+        if (!Number.isFinite(value) || value < 0) return "—";
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        let scaled = value;
+        let unit = 0;
+        while (Math.abs(scaled) >= 1000 && unit < units.length - 1) {
+          scaled /= 1000;
+          unit += 1;
+        }
+        return unit === 0 ? `${Math.round(scaled)} ${units[unit]}` : `${scaled.toFixed(1)} ${units[unit]}`;
       }
 
-      function readableMiB(value) {
-        const number = Number(value);
-        if (!Number.isFinite(number)) return "—";
-        if (number >= 1024) return `${(number / 1024).toFixed(1)} GiB`;
-        return `${Math.round(number)} MiB`;
+      function splitThinkingDisplay(text) {
+        const value = String(text || "");
+        if (!value) return [];
+        if (/\n\n/.test(value)) {
+          const parts = value.split(/\n\n+/);
+          return parts.map((part, index) => (index < parts.length - 1 ? `${part}\n\n` : part)).filter((part) => part.trim().length > 0);
+        }
+        const chunks = [];
+        const pattern = /[^.!?…\n]*[.!?…]+(?:\s+|\n+|$)/g;
+        let match;
+        let last = 0;
+        while ((match = pattern.exec(value)) !== null) {
+          if (match[0].trim()) chunks.push(match[0]);
+          last = pattern.lastIndex;
+        }
+        const tail = value.slice(last);
+        if (tail) chunks.push(tail);
+        return chunks.length ? chunks : [value];
       }
 
       function readableTime(value) {
@@ -2195,7 +2230,16 @@
           actions.append(download);
         }
         head.append(actions);
-        pane.append(head, node("div", "pane-content", content));
+        const body = node("div", "pane-content");
+        if (thinking && content) {
+          body.classList.add("thinking-stream-body");
+          for (const chunk of splitThinkingDisplay(content)) {
+            body.append(node("div", "think-paragraph", chunk.trimEnd()));
+          }
+        } else {
+          body.textContent = content;
+        }
+        pane.append(head, body);
         return pane;
       }
 
@@ -2366,7 +2410,7 @@
       function renderMemory() {
         const memory = state.memory || {};
         const gpus = Array.isArray(memory.gpus) ? memory.gpus : [];
-        elements.rssValue.textContent = `RSS ${readableMiB(memory.rss_mib)}`;
+        elements.rssValue.textContent = `RAM ${readableBytes(memory.rss_bytes)}`;
         elements.gpuList.replaceChildren();
         renderCapacity();
         if (!gpus.length) {
@@ -2374,25 +2418,25 @@
           elements.gpuList.append(node("div", "resource-empty", "No visible GPU memory data"));
           return;
         }
-        const used = gpus.reduce((sum, gpu) => sum + Number(gpu.used_mib || 0), 0);
-        const total = gpus.reduce((sum, gpu) => sum + Number(gpu.total_mib || 0), 0);
-        elements.resourceSummary.textContent = `${readableMiB(Math.max(0, total - used))} free`;
+        const used = gpus.reduce((sum, gpu) => sum + Number(gpu.used_bytes || 0), 0);
+        const total = gpus.reduce((sum, gpu) => sum + Number(gpu.total_bytes || 0), 0);
+        elements.resourceSummary.textContent = `${readableBytes(Math.max(0, total - used))} free`;
         for (const gpu of gpus) {
-          const usedMiB = Number(gpu.used_mib || 0);
-          const totalMiB = Number(gpu.total_mib || 0);
-          const ratio = totalMiB > 0 ? Math.min(100, Math.max(0, usedMiB / totalMiB * 100)) : 0;
+          const usedBytes = Number(gpu.used_bytes || 0);
+          const totalBytes = Number(gpu.total_bytes || 0);
+          const ratio = totalBytes > 0 ? Math.min(100, Math.max(0, usedBytes / totalBytes * 100)) : 0;
           const row = node("div", "gpu-row");
           const labels = node("div", "gpu-labels");
-          labels.append(node("span", "gpu-name", `GPU ${gpu.index} · ${gpu.name || "NVIDIA"}`), node("span", "gpu-value", `${readableMiB(usedMiB)} / ${readableMiB(totalMiB)}`));
+          labels.append(node("span", "gpu-name", `GPU ${gpu.index} · ${gpu.name || "NVIDIA"}`), node("span", "gpu-value", `${readableBytes(usedBytes)} / ${readableBytes(totalBytes)}`));
           const bar = node("div", "bar");
           const fill = node("div", "bar-fill");
           fill.style.width = `${ratio}%`;
           bar.append(fill);
           row.append(labels, bar);
-          const allocated = Number(gpu.process_allocated_mib);
-          const reserved = Number(gpu.process_reserved_mib);
+          const allocated = Number(gpu.process_allocated_bytes);
+          const reserved = Number(gpu.process_reserved_bytes);
           if (Number.isFinite(allocated) || Number.isFinite(reserved)) {
-            row.append(node("div", "session-meta", `Process ${readableMiB(allocated)} allocated · ${readableMiB(reserved)} reserved`));
+            row.append(node("div", "session-meta", `Process ${readableBytes(allocated)} allocated · ${readableBytes(reserved)} reserved`));
           }
           elements.gpuList.append(row);
         }
@@ -2424,14 +2468,14 @@
         }
         setCapacityBar(elements.contextCapacityBar, elements.contextCapacityFill, contextUsed, contextTotal);
         const gpus = Array.isArray(memory.gpus) ? memory.gpus : [];
-        const totalVram = gpus.reduce((sum, gpu) => sum + (finiteNumber(gpu.total_mib) || 0), 0);
+        const totalVram = gpus.reduce((sum, gpu) => sum + (finiteNumber(gpu.total_bytes) || 0), 0);
         const freeVram = gpus.reduce((sum, gpu) => {
-          const explicit = finiteNumber(gpu.free_mib);
-          const total = finiteNumber(gpu.total_mib) || 0;
-          const used = finiteNumber(gpu.used_mib) || 0;
+          const explicit = finiteNumber(gpu.free_bytes);
+          const total = finiteNumber(gpu.total_bytes) || 0;
+          const used = finiteNumber(gpu.used_bytes) || 0;
           return sum + (explicit === null ? Math.max(0, total - used) : explicit);
         }, 0);
-        elements.vramCapacityValue.textContent = totalVram > 0 ? `${readableMiB(freeVram)} / ${readableMiB(totalVram)} free` : "Awaiting GPU";
+        elements.vramCapacityValue.textContent = totalVram > 0 ? `${readableBytes(freeVram)} / ${readableBytes(totalVram)} free` : "Awaiting GPU";
         setCapacityBar(elements.vramCapacityBar, elements.vramCapacityFill, totalVram > 0 ? freeVram : null, totalVram || null);
         const headroomParts = [];
         if (contextHeadroom !== null) headroomParts.push(`${formatNumber(contextHeadroom)} context`);
@@ -2618,7 +2662,7 @@
         const active = state.active;
         elements.generationStage.textContent = active.stage;
         renderTokenArea(elements.liveAnswer, active.answer, "Answer tokens will appear here");
-        renderTokenArea(elements.liveReasoning, active.reasoning, "Reasoning tokens will appear here");
+        renderTokenArea(elements.liveReasoning, active.reasoning, "Reasoning tokens will appear here", { paragraphs: true });
         elements.liveMetrics.replaceChildren();
         const metrics = [
           ["Prompt", active.promptTokens],
@@ -2639,13 +2683,22 @@
         if (hasStructured) elements.structuredContent.textContent = structuredText(active.structured);
       }
 
-      function renderTokenArea(target, value, placeholder) {
+      function renderTokenArea(target, value, placeholder, options = {}) {
         const rendered = value || "";
         if (renderedTokenText.get(target) === rendered) return;
         const follow = wantsScrollFollow(target);
         const scrollTop = target.scrollTop;
-        if (rendered) target.textContent = rendered;
-        else {
+        if (rendered && options.paragraphs) {
+          target.replaceChildren();
+          target.classList.add("thinking-stream-body");
+          for (const chunk of splitThinkingDisplay(rendered)) {
+            target.append(node("div", "think-paragraph", chunk.trimEnd()));
+          }
+        } else if (rendered) {
+          target.classList.remove("thinking-stream-body");
+          target.textContent = rendered;
+        } else {
+          target.classList.remove("thinking-stream-body");
           target.replaceChildren();
           target.append(node("span", "pane-placeholder", placeholder));
         }

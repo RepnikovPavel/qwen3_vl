@@ -31,11 +31,25 @@ QWEN3_PULL_BASE=1 ./docker/build.sh
 
 ```bash
 mkdir -p "$HOME/qwen3-vl-demo-state"
+./docker/build.sh
 ./docker/run_demo.sh "$MODELS" "$HOME/qwen3-vl-demo-state" 8001
 ssh -N -L 8001:127.0.0.1:8001 USER@SERVER
 ```
 
-Открыть `http://127.0.0.1:8001`. Только FP8 CUDA; `single` использует одну видимую GPU, `balanced` распределяет модель по нескольким. Сессии и media лежат в state-каталоге.
+Открыть `http://127.0.0.1:8001`. Только FP8 CUDA; `single` — одна GPU, `balanced` — model-parallel по двум картам. Сессии и media в state-каталоге.
+
+### Деплой на GPU-сервер (tuna)
+
+```bash
+git clone https://github.com/RepnikovPavel/qwen3_vl.git /mnt/nvme2/qwen3_vl
+cd /mnt/nvme2/qwen3_vl
+export MODELS=/mnt/hdd1/qwen3_models
+export STATE=/mnt/nvme2/qwen3_vl_demo_state
+./docker/build.sh
+./docker/run_demo.sh "$MODELS" "$STATE" 8001
+```
+
+С ноутбука: `ssh -N -L 8001:127.0.0.1:8001 tuna-server` → `http://127.0.0.1:8001`. На сервере сейчас доступна **8B FP8**; 2B/4B появятся после `download`.
 
 ## GPU FP8 inference
 

@@ -101,13 +101,13 @@ def _estimate_token_headroom(
         gpu = by_index.get(index)
         if gpu is None or layer_count <= 0:
             return None, None
-        total_mib = float(gpu["total_mib"])
-        free_mib = float(gpu["free_mib"])
-        allocated_mib = float(gpu["process_allocated_mib"])
-        reserved_mib = float(gpu["process_reserved_mib"])
-        reusable_mib = max(0.0, reserved_mib - allocated_mib)
-        safety_mib = max(1024.0, total_mib * 0.08)
-        usable_bytes = max(0.0, free_mib + reusable_mib - safety_mib) * 1024**2
+        total_bytes = float(gpu["total_bytes"])
+        free_bytes = float(gpu["free_bytes"])
+        allocated_bytes = float(gpu["process_allocated_bytes"])
+        reserved_bytes = float(gpu["process_reserved_bytes"])
+        reusable_bytes = max(0.0, reserved_bytes - allocated_bytes)
+        safety_bytes = max(1024 * 1024 * 1024, total_bytes * 0.08)
+        usable_bytes = max(0.0, free_bytes + reusable_bytes - safety_bytes)
         growth_bytes = per_layer_bytes * layer_count * 2.25
         estimates[index] = int(usable_bytes / growth_bytes)
         gpu["kv_layers"] = layer_count
@@ -122,14 +122,14 @@ def _estimate_token_headroom(
     return estimate, bottleneck
 
 
-def _current_rss_mib() -> float:
+def _current_rss_bytes() -> int:
     try:
         for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
             if line.startswith("VmRSS:"):
-                return int(line.split()[1]) / 1024
+                return int(line.split()[1]) * 1024
     except (OSError, ValueError, IndexError):
-        return 0.0
-    return 0.0
+        return 0
+    return 0
 
 
 class DemoModelManager:
@@ -392,14 +392,14 @@ class DemoModelManager:
                         {
                             "index": index,
                             "name": torch.cuda.get_device_name(index),
-                            "total_mib": round(total / 1024**2, 1),
-                            "used_mib": round((total - free) / 1024**2, 1),
-                            "free_mib": round(free / 1024**2, 1),
-                            "process_allocated_mib": round(
-                                torch.cuda.memory_allocated(index) / 1024**2, 1
+                            "total_bytes": int(total),
+                            "used_bytes": int(total - free),
+                            "free_bytes": int(free),
+                            "process_allocated_bytes": int(
+                                torch.cuda.memory_allocated(index)
                             ),
-                            "process_reserved_mib": round(
-                                torch.cuda.memory_reserved(index) / 1024**2, 1
+                            "process_reserved_bytes": int(
+                                torch.cuda.memory_reserved(index)
                             ),
                         }
                     )
@@ -410,7 +410,7 @@ class DemoModelManager:
         except (AttributeError, KeyError, TypeError, ValueError, RuntimeError):
             estimate, bottleneck = None, None
         return {
-            "rss_mib": round(_current_rss_mib(), 1),
+            "rss_bytes": _current_rss_bytes(),
             "gpus": gpus,
             "estimated_token_headroom": estimate,
             "capacity_bottleneck_gpu": bottleneck,
