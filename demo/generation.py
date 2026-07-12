@@ -36,6 +36,41 @@ def split_live_text(value: str) -> tuple[str, str]:
     return "", value
 
 
+def model_input_devices(model: Any) -> tuple[Any, Any]:
+    embedding = model.get_input_embeddings()
+    embedding_device = next(embedding.parameters()).device
+    visual = getattr(getattr(model, "model", None), "visual", None)
+    if visual is None:
+        visual = getattr(model, "visual", None)
+    if visual is None:
+        raise RuntimeError("Qwen3-VL visual module was not found")
+    visual_device = next(visual.parameters()).device
+    if visual_device != embedding_device:
+        raise RuntimeError(
+            f"vision and input embeddings must share a device; got "
+            f"{visual_device} and {embedding_device}"
+        )
+    return embedding_device, visual_device
+
+
+def move_inputs_to_model_devices(model: Any, inputs: Any) -> tuple[Any, str, str]:
+    import torch
+
+    embedding_device, visual_device = model_input_devices(model)
+    visual_keys = {
+        "pixel_values",
+        "pixel_values_videos",
+        "image_grid_thw",
+        "video_grid_thw",
+        "second_per_grid_ts",
+    }
+    for key, value in inputs.items():
+        if isinstance(value, torch.Tensor):
+            target = visual_device if key in visual_keys else embedding_device
+            inputs[key] = value.to(target)
+    return inputs, str(embedding_device), str(visual_device)
+
+
 def run_streaming_generation(
     runtime: Any,
     media_inputs: Sequence[tuple[str, Any]],
@@ -120,7 +155,9 @@ def run_streaming_generation(
             f"prompt ({prompt_tokens}) + max_new_tokens ({max_new_tokens}) exceeds "
             f"the model context limit ({context_tokens})"
         )
-    inputs = inputs.to("cuda")
+    inputs, input_device, visual_device = move_inputs_to_model_devices(
+        runtime.model, inputs
+    )
     for index in range(torch.cuda.device_count()):
         torch.cuda.synchronize(index)
         torch.cuda.reset_peak_memory_stats(index)
@@ -132,6 +169,8 @@ def run_streaming_generation(
             "visual_tokens": visual_tokens,
             "context_tokens": context_tokens,
             "preprocess_seconds": round(preprocess_seconds, 3),
+            "input_device": input_device,
+            "visual_device": visual_device,
         }
     )
 

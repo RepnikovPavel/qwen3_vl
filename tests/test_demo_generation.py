@@ -1,6 +1,14 @@
 import unittest
+from types import SimpleNamespace
 
-from demo.generation import DemoGenerationResult, split_live_text
+import torch
+
+from demo.generation import (
+    DemoGenerationResult,
+    model_input_devices,
+    move_inputs_to_model_devices,
+    split_live_text,
+)
 
 
 class DemoGenerationTest(unittest.TestCase):
@@ -18,6 +26,33 @@ class DemoGenerationTest(unittest.TestCase):
         reasoning, answer = split_live_text("Direct visual answer")
         self.assertEqual(reasoning, "")
         self.assertEqual(answer, "Direct visual answer")
+
+    def test_inputs_follow_embedding_and_visual_devices(self):
+        embedding = torch.nn.Embedding(8, 3, device="meta")
+        visual = torch.nn.Linear(2, 2, device="meta")
+        model = SimpleNamespace(
+            get_input_embeddings=lambda: embedding,
+            model=SimpleNamespace(visual=visual),
+        )
+        inputs = {
+            "input_ids": torch.ones((1, 2), dtype=torch.long),
+            "attention_mask": torch.ones((1, 2), dtype=torch.long),
+            "pixel_values": torch.ones((2, 2)),
+            "image_grid_thw": torch.ones((1, 3), dtype=torch.long),
+        }
+        moved, input_device, visual_device = move_inputs_to_model_devices(model, inputs)
+        self.assertEqual((input_device, visual_device), ("meta", "meta"))
+        self.assertTrue(all(value.device.type == "meta" for value in moved.values()))
+
+    def test_split_vision_and_embedding_devices_are_rejected(self):
+        embedding = torch.nn.Embedding(8, 3, device="meta")
+        visual = torch.nn.Linear(2, 2)
+        model = SimpleNamespace(
+            get_input_embeddings=lambda: embedding,
+            model=SimpleNamespace(visual=visual),
+        )
+        with self.assertRaisesRegex(RuntimeError, "must share a device"):
+            model_input_devices(model)
 
     def test_result_serializes_all_demo_metrics(self):
         result = DemoGenerationResult(
