@@ -25,5 +25,6 @@ py-modules = [
   "qwen3_vl_offline",
   "parity",
   "reference_vl",
+  "run_vl_eval",
   "web_ui",
 ]

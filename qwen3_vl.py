@@ -17,6 +17,7 @@ Commands:
   infer          run local single/multi-image or video inference
   web            start the local Web UI
   benchmark      benchmark one model in one process
+  eval-run       run all synthetic VL evaluation fixtures
   parity-run     compare direct Transformers generation with the runtime
   sweep-context  find the practical context limit with isolated processes
 
@@ -80,6 +81,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from benchmark import main as benchmark_main
 
         return benchmark_main(rest)
+    if command == "eval-run":
+        from run_vl_eval import main as eval_run_main
+
+        return eval_run_main(rest)
     if command == "parity-run":
         from reference_vl import main as parity_main
 

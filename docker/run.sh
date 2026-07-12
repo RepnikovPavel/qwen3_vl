@@ -14,6 +14,8 @@ Modes:
   benchmark-cpu  CPU-FP32 benchmark with network disabled
   parity         GPU-FP8 direct-reference parity with network disabled
   parity-cpu     CPU-FP32 direct-reference parity with network disabled
+  eval-gpu       GPU-FP8 synthetic OCR/formula/chart evaluation
+  eval-cpu       CPU-FP32 synthetic OCR/formula/chart evaluation
   sweep          GPU-FP8 context sweep with network disabled
   web            Web UI on host 127.0.0.1:PORT
 
@@ -88,7 +90,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${mode}" in
-    download|infer-gpu|infer-cpu|benchmark|benchmark-cpu|parity|parity-cpu|sweep|web) ;;
+    download|infer-gpu|infer-cpu|benchmark|benchmark-cpu|parity|parity-cpu|eval-gpu|eval-cpu|sweep|web) ;;
     *) usage >&2; die "unknown mode: ${mode}" ;;
 esac
 
@@ -100,6 +102,9 @@ if [[ "${mode}" != "download" ]]; then
 fi
 if [[ -n "${output_dir}" ]]; then
     output_dir="$(canonical_dir "${output_dir}")"
+fi
+if [[ "${mode}" == "eval-gpu" || "${mode}" == "eval-cpu" ]]; then
+    [[ -n "${output_dir}" ]] || die "--output is required for ${mode}"
 fi
 [[ "${host_port}" =~ ^[0-9]+$ ]] || die "--port must be numeric"
 (( host_port >= 1 && host_port <= 65535 )) || die "--port must be between 1 and 65535"
@@ -225,6 +230,30 @@ case "${mode}" in
             --ckpt-dir /models
         )
         if [[ "${parity_device}" == "cuda" ]]; then
+            container_command+=(--kernel-dir "${kernel_dir}")
+        fi
+        ;;
+    eval-gpu|eval-cpu)
+        docker_args+=(
+            --network=none
+            --no-healthcheck
+            --mount "type=bind,src=${models_dir},dst=/models,readonly"
+            --mount "type=bind,src=${data_dir},dst=/data,readonly"
+            --mount "type=bind,src=${output_dir},dst=/output"
+            "${offline_env[@]}"
+        )
+        eval_device="cpu"
+        if [[ "${mode}" == "eval-gpu" ]]; then
+            eval_device="cuda"
+            docker_args+=(--gpus "${gpu_request}")
+        fi
+        container_command=(
+            python3 run_vl_eval.py
+            "${app_args[@]}"
+            --device "${eval_device}"
+            --ckpt-dir /models
+        )
+        if [[ "${eval_device}" == "cuda" ]]; then
             container_command+=(--kernel-dir "${kernel_dir}")
         fi
         ;;

@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import time
 from pathlib import Path
 from typing import Sequence
 
@@ -14,7 +13,6 @@ from parity import (
     TOKEN_ENCODING,
     build_parity_artifact,
     compare_artifacts,
-    token_ids_sha256,
 )
 from qwen3_vl_offline import (
     DEFAULT_CKPT_DIR,
@@ -22,6 +20,7 @@ from qwen3_vl_offline import (
     GPU_PLACEMENTS,
     Qwen3VLRuntime,
     _sync,
+    validate_generation_settings,
 )
 
 
@@ -55,7 +54,7 @@ def _candidate_artifact(result, metadata: dict[str, object]) -> dict[str, object
         "continuation": {
             "encoding": TOKEN_ENCODING,
             "length": len(result.token_ids),
-            "sha256": token_ids_sha256(result.token_ids),
+            "sha256": result.token_ids_sha256,
             "token_ids": list(result.token_ids),
         },
         "metadata": metadata,
@@ -87,7 +86,6 @@ def _reference_generate(runtime, image_path: str, prompt: str, maximum: int, sid
         torch.cuda.manual_seed_all(runtime.seed)
     device_inputs = inputs.to(runtime.device)
     _sync(runtime.device)
-    started = time.perf_counter()
     with torch.inference_mode():
         output = runtime.model.generate(
             **device_inputs,
@@ -99,22 +97,32 @@ def _reference_generate(runtime, image_path: str, prompt: str, maximum: int, sid
             use_cache=True,
         )
     _sync(runtime.device)
-    seconds = time.perf_counter() - started
     prompt_tokens = int(inputs["input_ids"].shape[1])
     token_ids = output[0, prompt_tokens:].tolist()
     return build_parity_artifact(
         inputs,
         token_ids,
         metadata={
-            "implementation": "direct_transformers_demo_semantics",
+            "implementation": "direct_transformers_generate",
             "finish_reason": _finish_reason(runtime.model, token_ids, maximum),
             "prompt_tokens": prompt_tokens,
-            "generation_seconds": seconds,
         },
     )
 
 
+def _validate_args(args) -> None:
+    validate_generation_settings(
+        max_new_tokens=args.max_new_tokens,
+        max_image_side=args.max_image_side,
+        temperature=1.0,
+        top_p=0.95,
+        top_k=20,
+        cpu_threads=args.cpu_threads,
+    )
+
+
 def run(args) -> dict[str, object]:
+    _validate_args(args)
     image_path = Path(args.image).expanduser().resolve()
     if not image_path.is_file():
         raise FileNotFoundError(f"image does not exist: {image_path}")
@@ -155,6 +163,7 @@ def run(args) -> dict[str, object]:
         max_new_tokens=args.max_new_tokens,
         max_image_side=args.max_image_side,
         do_sample=False,
+        check_finite_logits=False,
     )
     candidate = _candidate_artifact(
         candidate_result,
@@ -163,7 +172,6 @@ def run(args) -> dict[str, object]:
             "implementation": "qwen3_vl_runtime",
             "finish_reason": candidate_result.finish_reason,
             "prompt_tokens": candidate_result.prompt_tokens,
-            "generation_seconds": candidate_result.generation_seconds,
         },
     )
     comparison = compare_artifacts(reference, candidate, require_token_ids=True)
@@ -173,6 +181,7 @@ def run(args) -> dict[str, object]:
     )
     return {
         "schema_version": 1,
+        "proof_basis": "direct_generate_vs_runtime_wrapper_same_loaded_model",
         "proof_scope": "complete_answer" if complete else "generated_prefix",
         "reference": reference,
         "candidate": candidate,
@@ -188,7 +197,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ckpt-dir", default=str(DEFAULT_CKPT_DIR))
     parser.add_argument("--kernel-dir")
     parser.add_argument("--image", default=str(DEFAULT_IMAGE))
-    parser.add_argument("--prompt", default="Describe the scene completely and precisely.")
+    parser.add_argument(
+        "--prompt", default="Describe the scene completely and precisely."
+    )
     parser.add_argument("--max-image-side", type=int, default=640)
     parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--seed", type=int, default=0)
