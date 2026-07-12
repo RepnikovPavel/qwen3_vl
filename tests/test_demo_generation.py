@@ -14,6 +14,11 @@ class DemoGenerationTest(unittest.TestCase):
         self.assertEqual(reasoning, "still inspecting")
         self.assertEqual(answer, "")
 
+    def test_split_live_text_streams_markerless_output_as_answer(self):
+        reasoning, answer = split_live_text("Direct visual answer")
+        self.assertEqual(reasoning, "")
+        self.assertEqual(answer, "Direct visual answer")
+
     def test_result_serializes_all_demo_metrics(self):
         result = DemoGenerationResult(
             answer="ok",

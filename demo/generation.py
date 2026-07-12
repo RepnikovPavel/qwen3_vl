@@ -31,7 +31,9 @@ def split_live_text(value: str) -> tuple[str, str]:
     if marker in value:
         reasoning, answer = value.split(marker, 1)
         return reasoning.rsplit("<think>", 1)[-1].lstrip("\r\n"), answer.lstrip("\r\n")
-    return value.rsplit("<think>", 1)[-1].lstrip("\r\n"), ""
+    if "<think>" in value:
+        return value.rsplit("<think>", 1)[-1].lstrip("\r\n"), ""
+    return "", value
 
 
 def run_streaming_generation(
