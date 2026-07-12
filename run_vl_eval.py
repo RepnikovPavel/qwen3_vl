@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -59,6 +60,10 @@ def run_manifest(
     verify_sha: bool = False,
     yarn_1m: bool = False,
     gpu_placement: str = "single",
+    do_sample: bool = False,
+    temperature: float = 0.6,
+    top_p: float = 0.95,
+    top_k: int = 20,
     allow_incomplete: bool = False,
     verbose: bool = True,
     runtime_factory: Callable[..., Any] | None = None,
@@ -75,6 +80,12 @@ def run_manifest(
         raise ValueError(
             "cpu_threads, max_image_side, and max_new_tokens must be positive"
         )
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("temperature must be finite and positive")
+    if not math.isfinite(top_p) or not 0 < top_p <= 1:
+        raise ValueError("top_p must be finite and in (0, 1]")
+    if top_k < 1:
+        raise ValueError("top_k must be positive")
     manifest_file = Path(manifest_path).expanduser().resolve()
     output_file = Path(output_path).expanduser().resolve()
     manifest_data, _ = _load_json(manifest_file)
@@ -111,7 +122,10 @@ def run_manifest(
             prompt=fixture["prompt"],
             max_new_tokens=max_new_tokens,
             max_image_side=max_image_side,
-            do_sample=False,
+            do_sample=do_sample,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
             check_finite_logits=True,
         )
         answer = getattr(result, "answer", None)
@@ -147,6 +161,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verify-sha", action="store_true")
     parser.add_argument("--yarn-1m", action="store_true")
     parser.add_argument("--gpu-placement", choices=GPU_PLACEMENTS, default="single")
+    parser.add_argument("--sample", action="store_true")
+    parser.add_argument("--temperature", type=float, default=0.6)
+    parser.add_argument("--top-p", type=float, default=0.95)
+    parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--allow-incomplete", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     return parser
@@ -169,6 +187,10 @@ def main(argv: list[str] | None = None) -> int:
         verify_sha=args.verify_sha,
         yarn_1m=args.yarn_1m,
         gpu_placement=args.gpu_placement,
+        do_sample=args.sample,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        top_k=args.top_k,
         allow_incomplete=args.allow_incomplete,
         verbose=not args.quiet,
     )

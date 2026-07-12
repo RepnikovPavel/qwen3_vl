@@ -73,7 +73,7 @@ class RunManifestTest(unittest.TestCase):
         self.assertEqual(result, 19)
         runner.assert_called_once_with(["--manifest", "m", "--output", "o"])
 
-    def test_loads_one_runtime_runs_all_fixtures_greedily_and_writes_compatible_json(
+    def test_loads_one_runtime_runs_all_fixtures_and_writes_compatible_json(
         self,
     ):
         with tempfile.TemporaryDirectory() as temporary:
@@ -96,6 +96,10 @@ class RunManifestTest(unittest.TestCase):
                 seed=99,
                 max_image_side=900,
                 max_new_tokens=321,
+                do_sample=True,
+                temperature=0.7,
+                top_p=0.8,
+                top_k=11,
                 verbose=False,
                 runtime_factory=factory,
             )
@@ -116,7 +120,10 @@ class RunManifestTest(unittest.TestCase):
                 call["media_inputs"],
                 [("image", str(manifest_path.parent / fixture["image"]))],
             )
-            self.assertFalse(call["do_sample"])
+            self.assertTrue(call["do_sample"])
+            self.assertEqual(call["temperature"], 0.7)
+            self.assertEqual(call["top_p"], 0.8)
+            self.assertEqual(call["top_k"], 11)
             self.assertTrue(call["check_finite_logits"])
             self.assertEqual(call["max_image_side"], 900)
             self.assertEqual(call["max_new_tokens"], 321)
