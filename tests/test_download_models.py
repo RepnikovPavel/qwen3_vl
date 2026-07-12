@@ -58,7 +58,9 @@ def create_checkpoint(root: Path) -> None:
         },
         root / first,
     )
-    save_file({"model.norm.weight": torch.ones((2,), dtype=torch.bfloat16)}, root / second)
+    save_file(
+        {"model.norm.weight": torch.ones((2,), dtype=torch.bfloat16)}, root / second
+    )
     index = {
         "metadata": {},
         "weight_map": {
@@ -67,7 +69,9 @@ def create_checkpoint(root: Path) -> None:
             "model.norm.weight": second,
         },
     }
-    (root / "model.safetensors.index.json").write_text(json.dumps(index), encoding="utf-8")
+    (root / "model.safetensors.index.json").write_text(
+        json.dumps(index), encoding="utf-8"
+    )
 
 
 def trusted_required_files(root: Path) -> tuple[SnapshotFileSpec, ...]:
@@ -129,7 +133,9 @@ class VerifyCheckpointTest(unittest.TestCase):
         index = json.loads(index_path.read_text())
         index["weight_map"]["model.norm.weight"] = "model-00001-of-00002.safetensors"
         index_path.write_text(json.dumps(index))
-        with self.assertRaisesRegex(CheckpointVerificationError, "tensor key mismatch|wrong shard"):
+        with self.assertRaisesRegex(
+            CheckpointVerificationError, "tensor key mismatch|wrong shard"
+        ):
             verify_checkpoint(self.root)
 
     def test_rejects_trailing_shard_data(self):
@@ -225,56 +231,71 @@ class DownloadModelTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             target = default_snapshot_path(temporary, "2b")
             target.mkdir(parents=True)
-            with mock.patch.object(
-                download_models, "verify_checkpoint", return_value={"ok": True}
-            ), mock.patch.object(download_models, "snapshot_download") as downloader:
-                result = download_models.download_model("2b", temporary, full_verify=False)
+            with (
+                mock.patch.object(
+                    download_models, "verify_checkpoint", return_value={"ok": True}
+                ),
+                mock.patch.object(download_models, "_query_remote_tree") as query,
+            ):
+                result = download_models.download_model("2b", temporary)
             self.assertEqual(result, target)
-            downloader.assert_not_called()
+            query.assert_not_called()
 
-    def test_download_uses_catalog_pin_target_and_environment_token_without_printing_it(self):
+    def test_download_uses_catalog_manifest_and_pinned_target(self):
         with tempfile.TemporaryDirectory() as temporary:
             target = default_snapshot_path(temporary, "4b")
-            secret_value = "test-token-that-must-not-be-printed"
-            with mock.patch.dict(os.environ, {"HF_TOKEN": secret_value}), mock.patch.object(
-                download_models, "snapshot_download", return_value=str(target)
-            ) as downloader, mock.patch.object(
-                download_models, "verify_checkpoint", return_value={"ok": True}
-            ), mock.patch("builtins.print") as printer:
-                result = download_models.download_model("4b", temporary, full_verify=False)
-
-            self.assertEqual(result, target)
-            kwargs = downloader.call_args.kwargs
-            self.assertEqual(kwargs["token"], secret_value)
-            self.assertEqual(kwargs["revision"], MODEL_SPECS["4b"].revision)
-            self.assertEqual(kwargs["local_dir"], str(target))
-            self.assertNotIn("cache_dir", kwargs)
-            printer.assert_not_called()
-
-    def test_download_without_environment_token_disables_implicit_auth(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            target = default_snapshot_path(temporary, "8b")
-            with mock.patch.dict(os.environ, {"HF_TOKEN": ""}), mock.patch.object(
-                download_models, "snapshot_download", return_value=str(target)
-            ) as downloader, mock.patch.object(
-                download_models, "verify_checkpoint", return_value={"ok": True}
+            with (
+                mock.patch.object(
+                    download_models, "_query_remote_tree", return_value={}
+                ) as query,
+                mock.patch.object(download_models, "_download_artifact") as downloader,
+                mock.patch.object(
+                    download_models, "verify_checkpoint", return_value={"ok": True}
+                ) as verifier,
             ):
-                result = download_models.download_model("8b", temporary, full_verify=False)
+                result = download_models.download_model("4b", temporary)
 
             self.assertEqual(result, target)
-            kwargs = downloader.call_args.kwargs
-            self.assertEqual(kwargs["revision"], MODEL_SPECS["8b"].revision)
-            self.assertIs(kwargs["token"], False)
-            self.assertEqual(kwargs["local_dir"], str(target))
+            query.assert_called_once_with(MODEL_SPECS["4b"])
+            self.assertEqual(
+                downloader.call_count,
+                len(MODEL_SPECS["4b"].required_files)
+                + len(MODEL_SPECS["4b"].weight_shards),
+            )
+            self.assertTrue(
+                all(call.args[2].parent == target for call in downloader.call_args_list)
+            )
+            verifier.assert_called_once_with(target, spec=MODEL_SPECS["4b"], full=True)
+
+    def test_download_environment_strips_model_credentials(self):
+        values = {
+            "HF_TOKEN": "secret-a",
+            "HF_HUB_TOKEN": "secret-b",
+            "HUGGING_FACE_HUB_TOKEN": "secret-c",
+            "HTTPS_PROXY": "http://proxy.invalid",
+        }
+        with mock.patch.dict(os.environ, values, clear=True):
+            environment = download_models._wget_environment()
+        self.assertNotIn("HF_TOKEN", environment)
+        self.assertNotIn("HF_HUB_TOKEN", environment)
+        self.assertNotIn("HUGGING_FACE_HUB_TOKEN", environment)
+        self.assertEqual(environment["HTTPS_PROXY"], values["HTTPS_PROXY"])
+        self.assertIn(
+            MODEL_SPECS["8b"].revision,
+            download_models._resolve_url(MODEL_SPECS["8b"], "config.json"),
+        )
 
     def test_arbitrary_revision_is_not_part_of_download_api(self):
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaises(TypeError):
                 download_models.download_model(
-                    "2b", temporary, revision="mutable-branch", full_verify=False
+                    "2b", temporary, revision="mutable-branch"
                 )
 
-        with mock.patch("sys.stderr", new=io.StringIO()), self.assertRaises(SystemExit) as raised:
+        with (
+            mock.patch("sys.stderr", new=io.StringIO()),
+            self.assertRaises(SystemExit) as raised,
+        ):
             download_models.main(["2b", "--revision", "mutable-branch"])
         self.assertEqual(raised.exception.code, 2)
 
