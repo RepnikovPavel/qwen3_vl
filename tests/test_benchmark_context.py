@@ -22,6 +22,7 @@ class ContextCandidateIsolationTest(unittest.TestCase):
             cpu_threads=16,
             timeout_seconds=7,
             yarn_1m=False,
+            gpu_placement="single",
         )
 
     def test_timeout_is_a_classified_candidate_failure(self):

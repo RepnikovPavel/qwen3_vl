@@ -76,6 +76,7 @@ def child_attempt(args) -> dict[str, object]:
             seed=args.seed,
             verbose=False,
             yarn_1m=args.yarn_1m,
+            gpu_placement=args.gpu_placement,
         )
         inputs, prompt_tokens = _prepare_for_target(
             runtime, args.image, args.child_target, args.max_image_side
@@ -92,7 +93,8 @@ def child_attempt(args) -> dict[str, object]:
 
         if args.device == "cuda":
             torch.cuda.empty_cache()
-            torch.cuda.reset_peak_memory_stats()
+            for index in range(torch.cuda.device_count()):
+                torch.cuda.reset_peak_memory_stats(index)
         _sync(args.device)
         infer_started = time.perf_counter()
         image_token_id = getattr(runtime.model.config, "image_token_id", None)
@@ -138,6 +140,22 @@ def child_attempt(args) -> dict[str, object]:
                 if args.device == "cuda"
                 else None
             ),
+            "peak_allocated_mb_per_device": (
+                {
+                    str(index): round(torch.cuda.max_memory_allocated(index) / (1024**2), 2)
+                    for index in range(torch.cuda.device_count())
+                }
+                if args.device == "cuda"
+                else None
+            ),
+            "peak_reserved_mb_per_device": (
+                {
+                    str(index): round(torch.cuda.max_memory_reserved(index) / (1024**2), 2)
+                    for index in range(torch.cuda.device_count())
+                }
+                if args.device == "cuda"
+                else None
+            ),
         }
     except (torch.cuda.OutOfMemoryError, MemoryError) as exc:
         return {
@@ -179,6 +197,8 @@ def _child_command(args, target: int) -> list[str]:
         str(args.cpu_threads),
         "--child-target",
         str(target),
+        "--gpu-placement",
+        args.gpu_placement,
     ]
     if args.model_path:
         command.extend(["--model-path", args.model_path])
@@ -277,15 +297,18 @@ def search(args) -> dict[str, object]:
     environment: dict[str, object] = {
         "torch": torch.__version__,
         "cuda_runtime": torch.version.cuda,
-        "gpu": None,
+        "gpus": [],
     }
     if args.device == "cuda" and torch.cuda.is_available():
-        props = torch.cuda.get_device_properties(0)
-        environment["gpu"] = {
-            "name": props.name,
-            "compute_capability": f"{props.major}.{props.minor}",
-            "total_vram_mb": round(props.total_memory / (1024**2), 2),
-        }
+        environment["gpus"] = [
+            {
+                "index": index,
+                "name": (props := torch.cuda.get_device_properties(index)).name,
+                "compute_capability": f"{props.major}.{props.minor}",
+                "total_vram_mb": round(props.total_memory / (1024**2), 2),
+            }
+            for index in range(torch.cuda.device_count())
+        ]
     return {
         "schema_version": 1,
         "created_at_utc": datetime.now(UTC).isoformat(),
@@ -295,6 +318,7 @@ def search(args) -> dict[str, object]:
             "revision": spec.revision,
         },
         "device_mode": "gpu_fp8" if args.device == "cuda" else "cpu_fp32",
+        "gpu_placement": args.gpu_placement,
         "context_mode": "yarn_1m" if args.yarn_1m else "native_256k",
         "method": "one-image text-dominant KV-cache pressure test",
         "image_sha256": image_digest,
@@ -324,6 +348,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-path")
     parser.add_argument("--ckpt-dir", default=str(DEFAULT_CKPT_DIR))
     parser.add_argument("--kernel-dir")
+    parser.add_argument(
+        "--gpu-placement",
+        choices=("single", "auto", "balanced", "balanced_low_0", "sequential"),
+        default="single",
+    )
     parser.add_argument("--image", default=str(DEFAULT_IMAGE))
     parser.add_argument("--max-image-side", type=int, default=224)
     parser.add_argument("--reserve", type=int, default=32)

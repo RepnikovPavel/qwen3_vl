@@ -109,6 +109,7 @@ def run_benchmark(args) -> dict[str, object]:
         kernel_dir=args.kernel_dir,
         cpu_threads=args.cpu_threads,
         seed=args.seed,
+        gpu_placement=args.gpu_placement,
     )
     media_inputs = [("image", str(image_path))]
 
@@ -159,6 +160,7 @@ def run_benchmark(args) -> dict[str, object]:
                 "tokens_per_second": result.tokens_per_second,
                 "finish_reason": result.finish_reason,
                 "peak_vram_mb": result.peak_vram_mb,
+                "peak_vram_mb_per_device": result.peak_vram_mb_per_device,
                 "answer_characters": len(result.answer),
                 "answer_sha256": hashlib.sha256(result.answer.encode("utf-8")).hexdigest(),
             }
@@ -174,15 +176,18 @@ def run_benchmark(args) -> dict[str, object]:
             for name in ("torch", "transformers", "accelerate", "kernels", "safetensors", "Pillow")
         },
         "cuda_runtime": torch.version.cuda,
-        "gpu": None,
+        "gpus": [],
     }
     if args.device == "cuda":
-        props = torch.cuda.get_device_properties(0)
-        environment["gpu"] = {
-            "name": props.name,
-            "compute_capability": f"{props.major}.{props.minor}",
-            "total_vram_mb": round(props.total_memory / (1024**2), 2),
-        }
+        environment["gpus"] = [
+            {
+                "index": index,
+                "name": (props := torch.cuda.get_device_properties(index)).name,
+                "compute_capability": f"{props.major}.{props.minor}",
+                "total_vram_mb": round(props.total_memory / (1024**2), 2),
+            }
+            for index in range(torch.cuda.device_count())
+        ]
 
     git_commit, git_dirty = _git_state()
     return {
@@ -199,6 +204,8 @@ def run_benchmark(args) -> dict[str, object]:
             "load_seconds": runtime.load_seconds,
             "fp8_modules": len(runtime.fp8_names),
             "compute_backend": runtime.compute_backend,
+            "gpu_placement": runtime.gpu_placement,
+            "hf_device_map": runtime.hf_device_map,
         },
         "kernel_sha256": _sha256_kernel(runtime.kernel_dir),
         "input": {
@@ -239,6 +246,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-path")
     parser.add_argument("--ckpt-dir", default=str(DEFAULT_CKPT_DIR))
     parser.add_argument("--kernel-dir")
+    parser.add_argument(
+        "--gpu-placement",
+        choices=("single", "auto", "balanced", "balanced_low_0", "sequential"),
+        default="single",
+    )
     parser.add_argument("--image", default=str(DEFAULT_IMAGE))
     parser.add_argument("--prompt", default=DEFAULT_PROMPT)
     parser.add_argument("--max-image-side", type=int, default=640)

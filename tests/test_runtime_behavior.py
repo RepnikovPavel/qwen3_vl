@@ -20,6 +20,7 @@ from qwen3_vl_offline import (
     generate,
     load_local_media,
     load_patched_config,
+    resolve_device_map,
 )
 
 
@@ -112,6 +113,21 @@ class OrderedMediaTest(unittest.TestCase):
                 ValueError, "remote media references are forbidden"
             ):
                 load_local_media([media_input], max_side=640)
+
+
+class DeviceMapTest(unittest.TestCase):
+    def test_single_device_maps_are_explicit(self):
+        self.assertEqual(resolve_device_map("cpu", "single"), "cpu")
+        self.assertEqual(resolve_device_map("cuda", "single"), "cuda")
+
+    def test_accelerate_multi_gpu_placements_are_preserved(self):
+        for placement in ("auto", "balanced", "balanced_low_0", "sequential"):
+            with self.subTest(placement=placement):
+                self.assertEqual(resolve_device_map("cuda", placement), placement)
+
+    def test_cpu_rejects_multi_gpu_placement(self):
+        with self.assertRaisesRegex(ValueError, "only valid with --device cuda"):
+            resolve_device_map("cpu", "balanced")
 
 
 MODEL_2B_PATH = (

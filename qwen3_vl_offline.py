@@ -72,6 +72,7 @@ from download_models import verify_checkpoint
 DEFAULT_CKPT_DIR = Path("/mnt/nvme/huggingface")
 NATIVE_CONTEXT_TOKENS = 262_144
 YARN_CONTEXT_TOKENS = 1_000_000
+GPU_PLACEMENTS = ("single", "auto", "balanced", "balanced_low_0", "sequential")
 DEFAULT_IMAGE = Path(
     "/mnt/nvme/rowdata/nu/samples/CAM_BACK_RIGHT/"
     "n008-2018-08-30-15-16-55-0400__CAM_BACK_RIGHT__1535657109278113.jpg"
@@ -111,6 +112,7 @@ class GenerationResult:
     total_seconds: float
     tokens_per_second: float
     peak_vram_mb: float | None
+    peak_vram_mb_per_device: dict[str, float] | None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -320,14 +322,30 @@ def inject_local_fp8_kernel(kernel_dir: Path) -> ModuleType:
     return module
 
 
-def load_model(model_path: Path, device: str, config, expected_scales: int):
+def resolve_device_map(device: str, gpu_placement: str):
+    if device == "cpu":
+        if gpu_placement != "single":
+            raise ValueError("multi-GPU placement is only valid with --device cuda")
+        return "cpu"
+    if gpu_placement not in GPU_PLACEMENTS:
+        raise ValueError(f"unsupported GPU placement: {gpu_placement}")
+    return "cuda" if gpu_placement == "single" else gpu_placement
+
+
+def load_model(
+    model_path: Path,
+    device: str,
+    config,
+    expected_scales: int,
+    gpu_placement: str = "single",
+):
     dtype: torch.dtype | str = torch.float32 if device == "cpu" else "auto"
     model = Qwen3VLForConditionalGeneration.from_pretrained(
         model_path,
         config=config,
         local_files_only=True,
         dtype=dtype,
-        device_map=device,
+        device_map=resolve_device_map(device, gpu_placement),
         low_cpu_mem_usage=True,
     ).eval()
 
@@ -461,7 +479,24 @@ def build_messages(
 
 def _sync(device: str) -> None:
     if device == "cuda":
-        torch.cuda.synchronize()
+        for index in range(torch.cuda.device_count()):
+            torch.cuda.synchronize(index)
+
+
+def _reset_peak_memory(device: str) -> None:
+    if device == "cuda":
+        for index in range(torch.cuda.device_count()):
+            torch.cuda.reset_peak_memory_stats(index)
+
+
+def _peak_memory(device: str) -> tuple[float | None, dict[str, float] | None]:
+    if device != "cuda":
+        return None, None
+    values = {
+        str(index): float(torch.cuda.max_memory_allocated(index) / (1024**2))
+        for index in range(torch.cuda.device_count())
+    }
+    return max(values.values(), default=0.0), values
 
 
 def _split_reasoning(raw_text: str, clean_text: str, special_tokens: Sequence[str]):
@@ -532,8 +567,7 @@ def generate(
             f"the model context limit ({context_limit})"
         )
 
-    if device == "cuda":
-        torch.cuda.reset_peak_memory_stats()
+    _reset_peak_memory(device)
     _sync(device)
     generation_started = time.perf_counter()
     with torch.inference_mode():
@@ -576,9 +610,7 @@ def generate(
     )[0]
     tokenizer = getattr(processor, "tokenizer", processor)
     reasoning, answer = _split_reasoning(raw_text, clean_text, tokenizer.all_special_tokens)
-    peak_vram_mb = (
-        float(torch.cuda.max_memory_allocated() / (1024**2)) if device == "cuda" else None
-    )
+    peak_vram_mb, peak_vram_mb_per_device = _peak_memory(device)
     total_seconds = preprocess_seconds + generation_seconds
     return GenerationResult(
         text=clean_text,
@@ -595,6 +627,7 @@ def generate(
         total_seconds=total_seconds,
         tokens_per_second=(generated_tokens / generation_seconds if generation_seconds else 0.0),
         peak_vram_mb=peak_vram_mb,
+        peak_vram_mb_per_device=peak_vram_mb_per_device,
     )
 
 
@@ -614,6 +647,7 @@ class Qwen3VLRuntime:
         verbose: bool = True,
         verify_sha: bool = False,
         yarn_1m: bool = False,
+        gpu_placement: str = "single",
     ):
         if device not in {"cpu", "cuda"}:
             raise ValueError(f"unsupported device: {device}")
@@ -630,6 +664,7 @@ class Qwen3VLRuntime:
         if yarn_1m:
             enable_official_yarn_1m(self.config)
         self.context_mode = "yarn_1m" if yarn_1m else "native_256k"
+        self.gpu_placement = gpu_placement
 
         from huggingface_hub.constants import HF_HUB_OFFLINE
 
@@ -644,10 +679,15 @@ class Qwen3VLRuntime:
         else:
             if not torch.cuda.is_available():
                 raise RuntimeError("CUDA is not available")
-            capability = torch.cuda.get_device_capability()
-            if capability < (8, 9):
+            capabilities = [
+                torch.cuda.get_device_capability(index)
+                for index in range(torch.cuda.device_count())
+            ]
+            unsupported = [value for value in capabilities if value < (8, 9)]
+            if unsupported:
                 raise RuntimeError(
-                    f"native fine-grained FP8 requires compute capability >= 8.9; got {capability}"
+                    "native fine-grained FP8 requires compute capability >= 8.9; "
+                    f"got {capabilities}"
                 )
             self.kernel_dir = resolve_local_kernel_dir(kernel_dir)
             inject_local_fp8_kernel(self.kernel_dir)
@@ -664,6 +704,16 @@ class Qwen3VLRuntime:
             device,
             self.config,
             expected_scales=int(self.checkpoint["scale_count"]),
+            gpu_placement=gpu_placement,
+        )
+        raw_device_map = getattr(self.model, "hf_device_map", None)
+        self.hf_device_map = (
+            {
+                str(name): value if isinstance(value, (int, str)) else str(value)
+                for name, value in raw_device_map.items()
+            }
+            if isinstance(raw_device_map, dict)
+            else None
         )
         _sync(device)
         self.load_seconds = time.perf_counter() - load_started
@@ -682,7 +732,8 @@ class Qwen3VLRuntime:
                 capability = torch.cuda.get_device_capability()
                 print(
                     f"GPU mode: {torch.cuda.get_device_name(0)}, SM{capability[0]}{capability[1]}\n"
-                    f"  local FP8 kernel={self.kernel_dir}"
+                    f"  local FP8 kernel={self.kernel_dir}\n"
+                    f"  placement={self.gpu_placement}, visible_gpus={torch.cuda.device_count()}"
                 )
             print(
                 f"model OK: fp8_modules={len(self.fp8_names)}, "
@@ -842,6 +893,7 @@ def build_parser(device: str | None = None) -> argparse.ArgumentParser:
     )
     parser.add_argument("--cpu-threads", type=int, default=min(os.cpu_count() or 1, 16))
     parser.add_argument("--kernel-dir", help="Local finegrained-fp8 Triton source directory")
+    parser.add_argument("--gpu-placement", choices=GPU_PLACEMENTS, default="single")
     return parser
 
 
@@ -899,6 +951,7 @@ def main(device: str | None = None, argv: Sequence[str] | None = None) -> int:
             verbose=not args.json,
             verify_sha=False,  # already verified above
             yarn_1m=args.yarn_1m,
+            gpu_placement=args.gpu_placement,
         )
         media_inputs = list(args.media or [])
         if not media_inputs and not args.text_only:
@@ -921,6 +974,8 @@ def main(device: str | None = None, argv: Sequence[str] | None = None) -> int:
             "device_mode": "gpu_fp8" if selected_device == "cuda" else "cpu_fp32",
             "compute_backend": runtime.compute_backend,
             "context_mode": runtime.context_mode,
+            "gpu_placement": runtime.gpu_placement,
+            "hf_device_map": runtime.hf_device_map,
             "media": [
                 {
                     "kind": item.kind,
