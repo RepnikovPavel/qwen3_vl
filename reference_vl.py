@@ -61,7 +61,18 @@ def _candidate_artifact(result, metadata: dict[str, object]) -> dict[str, object
     }
 
 
-def _reference_generate(runtime, image_path: str, prompt: str, maximum: int, side: int):
+def _reference_generate(
+    runtime,
+    image_path: str,
+    prompt: str,
+    maximum: int,
+    side: int,
+    *,
+    do_sample: bool = False,
+    temperature: float = 0.6,
+    top_p: float = 0.95,
+    top_k: int = 20,
+):
     media = runtime.prepare_media([("image", image_path)], side)
     messages = [
         {
@@ -90,10 +101,10 @@ def _reference_generate(runtime, image_path: str, prompt: str, maximum: int, sid
         output = runtime.model.generate(
             **device_inputs,
             max_new_tokens=maximum,
-            do_sample=False,
-            temperature=None,
-            top_p=None,
-            top_k=None,
+            do_sample=do_sample,
+            temperature=temperature if do_sample else None,
+            top_p=top_p if do_sample else None,
+            top_k=top_k if do_sample else None,
             use_cache=True,
         )
     _sync(runtime.device)
@@ -114,9 +125,9 @@ def _validate_args(args) -> None:
     validate_generation_settings(
         max_new_tokens=args.max_new_tokens,
         max_image_side=args.max_image_side,
-        temperature=1.0,
-        top_p=0.95,
-        top_k=20,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        top_k=args.top_k,
         cpu_threads=args.cpu_threads,
     )
 
@@ -147,7 +158,10 @@ def run(args) -> dict[str, object]:
         "max_image_side": args.max_image_side,
         "max_new_tokens": args.max_new_tokens,
         "seed": args.seed,
-        "decode": "greedy",
+        "decode": "sampling" if args.sample else "greedy",
+        "temperature": args.temperature if args.sample else None,
+        "top_p": args.top_p if args.sample else None,
+        "top_k": args.top_k if args.sample else None,
     }
     reference = _reference_generate(
         runtime,
@@ -155,6 +169,10 @@ def run(args) -> dict[str, object]:
         args.prompt,
         args.max_new_tokens,
         args.max_image_side,
+        do_sample=args.sample,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        top_k=args.top_k,
     )
     reference["metadata"].update(shared_metadata)
     candidate_result, _ = runtime.infer(
@@ -162,7 +180,10 @@ def run(args) -> dict[str, object]:
         prompt=args.prompt,
         max_new_tokens=args.max_new_tokens,
         max_image_side=args.max_image_side,
-        do_sample=False,
+        do_sample=args.sample,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        top_k=args.top_k,
         check_finite_logits=False,
     )
     candidate = _candidate_artifact(
@@ -203,6 +224,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-image-side", type=int, default=640)
     parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--sample", action="store_true")
+    parser.add_argument("--temperature", type=float, default=0.6)
+    parser.add_argument("--top-p", type=float, default=0.95)
+    parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--cpu-threads", type=int, default=16)
     parser.add_argument("--gpu-placement", choices=GPU_PLACEMENTS, default="single")
     parser.add_argument("--verify-sha", action="store_true")

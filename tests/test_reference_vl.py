@@ -134,11 +134,53 @@ class ReferenceResultTest(unittest.TestCase):
             self.assertEqual(runtime.model.calls[0][name], expected)
             self.assertEqual(runtime.model.calls[1][name], expected)
 
+    def test_sampling_reference_and_runtime_kwargs_are_identical(self):
+        runtime = _Runtime()
+        _reference_generate(
+            runtime,
+            "fixture.png",
+            "Read it.",
+            4,
+            640,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.8,
+            top_k=11,
+        )
+        media = runtime.prepare_media([("image", "fixture.png")], 640)
+        generate(
+            runtime.model,
+            runtime.processor,
+            media,
+            "Read it.",
+            "cpu",
+            4,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.8,
+            top_k=11,
+            check_finite_logits=False,
+        )
+
+        for name, expected in {
+            "max_new_tokens": 4,
+            "do_sample": True,
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 11,
+            "use_cache": True,
+        }.items():
+            self.assertEqual(runtime.model.calls[0][name], expected)
+            self.assertEqual(runtime.model.calls[1][name], expected)
+
     def test_invalid_generation_limits_are_rejected_before_loading(self):
         args = SimpleNamespace(
             max_new_tokens=0,
             max_image_side=640,
             cpu_threads=1,
+            temperature=0.6,
+            top_p=0.95,
+            top_k=20,
         )
         with self.assertRaisesRegex(ValueError, "must be positive"):
             _validate_args(args)

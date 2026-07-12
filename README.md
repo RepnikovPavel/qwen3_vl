@@ -60,7 +60,7 @@ RESULTS="$HOME/qwen3-results"
 mkdir -p "$RESULTS"
 
 ./docker/run.sh parity --models "$MODELS" --data "$DATA" --output "$RESULTS" -- \
-  --model 2b --image /data/scene.jpg --require-eos \
+  --model 2b --image /data/scene.jpg --sample --max-new-tokens 2048 --require-eos \
   --output /output/parity_2b_gpu.json
 ```
 
