@@ -5,6 +5,7 @@ import torch
 
 from demo.generation import (
     DemoGenerationResult,
+    context_progress,
     model_input_devices,
     move_inputs_to_model_devices,
     split_live_text,
@@ -12,6 +13,21 @@ from demo.generation import (
 
 
 class DemoGenerationTest(unittest.TestCase):
+    def test_context_progress_reports_exact_usage_and_headroom(self):
+        progress = context_progress(987, 1374, 262144)
+        self.assertEqual(progress["context_tokens"], 262144)
+        self.assertEqual(progress["context_limit_tokens"], 262144)
+        self.assertEqual(progress["context_used_tokens"], 2361)
+        self.assertEqual(progress["context_remaining_tokens"], 259783)
+        self.assertEqual(progress["token_headroom"], 259783)
+        self.assertEqual(progress["context_used_ratio"], 2361 / 262144)
+
+    def test_context_progress_clamps_exhausted_headroom(self):
+        progress = context_progress(7, 2, 8)
+        self.assertEqual(progress["context_used_tokens"], 9)
+        self.assertEqual(progress["context_remaining_tokens"], 0)
+        self.assertEqual(progress["token_headroom"], 0)
+
     def test_split_live_text_separates_reasoning_and_answer(self):
         reasoning, answer = split_live_text("<think>inspect image</think>42")
         self.assertEqual(reasoning, "inspect image")
@@ -22,10 +38,10 @@ class DemoGenerationTest(unittest.TestCase):
         self.assertEqual(reasoning, "still inspecting")
         self.assertEqual(answer, "")
 
-    def test_split_live_text_streams_markerless_output_as_answer(self):
+    def test_split_live_text_keeps_markerless_output_in_reasoning(self):
         reasoning, answer = split_live_text("Direct visual answer")
-        self.assertEqual(reasoning, "")
-        self.assertEqual(answer, "Direct visual answer")
+        self.assertEqual(reasoning, "Direct visual answer")
+        self.assertEqual(answer, "")
 
     def test_inputs_follow_embedding_and_visual_devices(self):
         embedding = torch.nn.Embedding(8, 3, device="meta")

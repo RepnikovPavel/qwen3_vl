@@ -357,6 +357,10 @@ class DemoServerTest(unittest.TestCase):
         self.assertIn('{"formulas":["latex","..."]}', generation_call[2])
         self.assertEqual(generation_call[5], 512)
         self.assertEqual(generation_call[6], 900)
+        status = self.client.get("/api/status").json()
+        self.assertFalse(status["loaded"])
+        self.assertFalse(status["keep_model_loaded"])
+        self.assertEqual(status["unload_policy"], "after_generation")
 
     def test_busy_manager_returns_409_without_starting_generation(self):
         session = self.create_session()
@@ -475,7 +479,7 @@ class DemoServerTest(unittest.TestCase):
         self.assertEqual(persisted["messages"][1]["content"], "Partial")
         self.assertTrue(persisted["messages"][1]["metrics"]["generation"]["stopped"])
 
-    def test_load_and_unload_use_real_manager_with_fake_runtime(self):
+    def test_load_and_retention_use_real_manager_with_fake_runtime(self):
         loaded = self.client.post(
             "/api/load",
             json={"model_id": "4b", "placement": "balanced"},
@@ -490,20 +494,38 @@ class DemoServerTest(unittest.TestCase):
                 "repo_id": MODEL_SPECS["4b"].repo_id,
                 "placement": "balanced",
                 "load_seconds": 0.125,
+                "keep_model_loaded": False,
+                "unloaded": True,
             },
         )
         self.assertEqual(self.runtime_calls[0]["device"], "cuda")
         self.assertEqual(self.runtime_calls[0]["gpu_placement"], "balanced")
         status = self.client.get("/api/status").json()
+        self.assertFalse(status["loaded"])
+        self.assertTrue(status["auto_unload_after_generation"])
+
+        retained = self.client.post(
+            "/api/load",
+            json={
+                "model_id": "4b",
+                "placement": "balanced",
+                "keep_model_loaded": True,
+            },
+        )
+        self.assertFalse(retained.json()["unloaded"])
+        status = self.client.get("/api/status").json()
         self.assertTrue(status["loaded"])
+        self.assertTrue(status["keep_model_loaded"])
         self.assertEqual(status["context_tokens"], 262_144)
         self.assertEqual(status["device_map"], {"visual": 0, "language.layers.0": 1})
 
-        first_unload = self.client.post("/api/unload")
-        second_unload = self.client.post("/api/unload")
-        self.assertEqual(first_unload.json(), {"ok": True, "unloaded": True})
-        self.assertEqual(second_unload.json(), {"ok": True, "unloaded": False})
-        self.assertFalse(self.client.get("/api/status").json()["loaded"])
+        released = self.client.post(
+            "/api/retention",
+            json={"keep_model_loaded": False},
+        )
+        self.assertEqual(released.status_code, 200, released.text)
+        self.assertFalse(released.json()["loaded"])
+        self.assertFalse(released.json()["keep_model_loaded"])
 
 
 if __name__ == "__main__":

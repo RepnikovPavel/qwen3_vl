@@ -26,6 +26,23 @@ class DemoGenerationResult:
         return asdict(self)
 
 
+def context_progress(
+    prompt_tokens: int,
+    generated_tokens: int,
+    context_limit_tokens: int,
+) -> dict[str, int | float]:
+    used_tokens = prompt_tokens + generated_tokens
+    remaining_tokens = max(0, context_limit_tokens - used_tokens)
+    return {
+        "context_tokens": context_limit_tokens,
+        "context_limit_tokens": context_limit_tokens,
+        "context_used_tokens": used_tokens,
+        "context_remaining_tokens": remaining_tokens,
+        "token_headroom": remaining_tokens,
+        "context_used_ratio": used_tokens / context_limit_tokens,
+    }
+
+
 def split_live_text(value: str) -> tuple[str, str]:
     marker = "</think>"
     if marker in value:
@@ -33,7 +50,7 @@ def split_live_text(value: str) -> tuple[str, str]:
         return reasoning.rsplit("<think>", 1)[-1].lstrip("\r\n"), answer.lstrip("\r\n")
     if "<think>" in value:
         return value.rsplit("<think>", 1)[-1].lstrip("\r\n"), ""
-    return "", value
+    return value, ""
 
 
 def model_input_devices(model: Any) -> tuple[Any, Any]:
@@ -167,7 +184,7 @@ def run_streaming_generation(
             "type": "prompt",
             "prompt_tokens": prompt_tokens,
             "visual_tokens": visual_tokens,
-            "context_tokens": context_tokens,
+            **context_progress(prompt_tokens, 0, context_tokens),
             "preprocess_seconds": round(preprocess_seconds, 3),
             "input_device": input_device,
             "visual_device": visual_device,
@@ -235,6 +252,11 @@ def run_streaming_generation(
                 {
                     "type": "stats_live",
                     "generated_tokens": streamer.generated_tokens,
+                    **context_progress(
+                        prompt_tokens,
+                        streamer.generated_tokens,
+                        context_tokens,
+                    ),
                     "tokens_per_second": round(streamer.generated_tokens / elapsed, 2),
                     "elapsed_seconds": round(elapsed, 2),
                 }

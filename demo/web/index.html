@@ -467,6 +467,8 @@
       border-radius: 13px;
       background: rgba(17, 21, 29, .98);
       box-shadow: var(--shadow);
+      max-height: calc(100vh - 76px);
+      overflow: auto;
     }
 
     .resource-panel.open {
@@ -538,6 +540,41 @@
       text-align: center;
     }
 
+    .capacity-list {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 14px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .capacity-labels {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 6px;
+      font-size: 11px;
+    }
+
+    .capacity-name {
+      color: #dce1e9;
+    }
+
+    .capacity-value {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .bar-fill.available {
+      background: linear-gradient(90deg, var(--good), var(--accent-2));
+    }
+
+    .bar-fill.warn {
+      background: linear-gradient(90deg, var(--warn), var(--bad));
+    }
+
     .workspace {
       position: relative;
       display: grid;
@@ -548,7 +585,8 @@
     .scroll-region {
       min-height: 0;
       overflow: auto;
-      scroll-behavior: smooth;
+      overscroll-behavior: contain;
+      scroll-behavior: auto;
       scrollbar-width: thin;
       scrollbar-color: #303747 transparent;
     }
@@ -568,6 +606,8 @@
 
     .hero-inner {
       width: min(700px, 100%);
+      min-width: 0;
+      max-width: 100%;
       text-align: center;
     }
 
@@ -782,6 +822,7 @@
       line-height: 1.65;
       scrollbar-width: thin;
       scrollbar-color: #303747 transparent;
+      overscroll-behavior: contain;
     }
 
     .thinking-pane .pane-content {
@@ -923,15 +964,16 @@
     }
 
     .dropzone {
-      display: none;
+      display: block;
       margin: 12px 12px 0;
-      padding: 15px;
+      padding: 11px 15px;
       border: 1px dashed #3a4354;
       border-radius: 12px;
       color: var(--muted);
       background: rgba(9, 12, 17, .65);
       font-size: 12px;
       text-align: center;
+      overflow-wrap: anywhere;
       transition: border-color .16s ease, color .16s ease, background .16s ease;
     }
 
@@ -1300,6 +1342,10 @@
         width: auto;
       }
 
+      select {
+        min-width: 0;
+      }
+
       .control.placement-control {
         width: auto;
       }
@@ -1401,6 +1447,7 @@
         position: fixed;
         top: 111px;
         right: 8px;
+        max-height: calc(100vh - 120px);
       }
 
       .advanced-grid {
@@ -1472,6 +1519,20 @@
           <button class="button resource-button" id="resourceButton" type="button" aria-haspopup="true" aria-expanded="false">GPU <span id="resourceSummary">—</span></button>
           <div class="resource-panel" id="resourcePanel" role="dialog" aria-label="Memory usage">
             <div class="resource-head"><span class="resource-title">Runtime memory</span><span class="rss-value" id="rssValue">RSS —</span></div>
+            <div class="capacity-list" aria-label="Runtime capacity">
+              <div class="capacity-row">
+                <div class="capacity-labels"><span class="capacity-name">Context</span><span class="capacity-value" id="contextCapacityValue">Awaiting prompt</span></div>
+                <div class="bar" id="contextCapacityBar" role="progressbar" aria-label="Context used"><div class="bar-fill" id="contextCapacityFill" style="width:0%"></div></div>
+              </div>
+              <div class="capacity-row">
+                <div class="capacity-labels"><span class="capacity-name">VRAM available</span><span class="capacity-value" id="vramCapacityValue">Awaiting GPU</span></div>
+                <div class="bar" id="vramCapacityBar" role="progressbar" aria-label="VRAM available"><div class="bar-fill available" id="vramCapacityFill" style="width:0%"></div></div>
+              </div>
+              <div class="capacity-row">
+                <div class="capacity-labels"><span class="capacity-name">Token headroom</span><span class="capacity-value" id="tokenHeadroomValue">Awaiting estimate</span></div>
+                <div class="bar" id="tokenHeadroomBar" role="progressbar" aria-label="Estimated token headroom"><div class="bar-fill available" id="tokenHeadroomFill" style="width:0%"></div></div>
+              </div>
+            </div>
             <div id="gpuList"></div>
           </div>
         </div>
@@ -1515,7 +1576,7 @@
         </div>
         <div class="composer-wrap">
           <section class="composer" id="composer" aria-label="Vision request">
-            <div class="dropzone" id="dropzone" role="button" tabindex="0">Drop images or video here</div>
+            <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Add visual media">Drop images or video here · paste an image from the clipboard · or click to browse</div>
             <div class="file-previews" id="filePreviews"></div>
             <div class="task-row" id="taskRow" aria-label="Task presets"></div>
             <label class="sr-only" for="customPrompt">Custom prompt</label>
@@ -1536,6 +1597,7 @@
                 <label class="advanced-field"><span class="field-label">Temperature</span><input class="number-input" id="temperature" type="number" min="0.01" max="5" step="0.05" value="0.6"></label>
                 <label class="advanced-field"><span class="field-label">Top P</span><input class="number-input" id="topP" type="number" min="0.01" max="1" step="0.01" value="0.95"></label>
                 <label class="advanced-field"><span class="field-label">Top K</span><input class="number-input" id="topK" type="number" min="1" max="1000" step="1" value="20"></label>
+                <label class="advanced-field"><span class="field-label">GPU retention</span><span class="toggle-field"><input id="keepModelLoaded" type="checkbox"> Keep model on GPU</span></label>
               </div>
             </details>
           </section>
@@ -1568,6 +1630,15 @@
         resourceSummary: $("resourceSummary"),
         resourcePanel: $("resourcePanel"),
         rssValue: $("rssValue"),
+        contextCapacityValue: $("contextCapacityValue"),
+        contextCapacityBar: $("contextCapacityBar"),
+        contextCapacityFill: $("contextCapacityFill"),
+        vramCapacityValue: $("vramCapacityValue"),
+        vramCapacityBar: $("vramCapacityBar"),
+        vramCapacityFill: $("vramCapacityFill"),
+        tokenHeadroomValue: $("tokenHeadroomValue"),
+        tokenHeadroomBar: $("tokenHeadroomBar"),
+        tokenHeadroomFill: $("tokenHeadroomFill"),
         gpuList: $("gpuList"),
         scrollRegion: $("scrollRegion"),
         hero: $("hero"),
@@ -1600,6 +1671,7 @@
         temperature: $("temperature"),
         topP: $("topP"),
         topK: $("topK"),
+        keepModelLoaded: $("keepModelLoaded"),
         toasts: $("toasts"),
         announcer: $("announcer")
       };
@@ -1616,6 +1688,7 @@
         files: [],
         status: {},
         memory: {},
+        retentionPending: false,
         generating: false,
         attaching: false,
         optimistic: null,
@@ -1624,6 +1697,11 @@
         active: freshActive(),
         search: ""
       };
+      const scrollFollowers = new WeakMap();
+      const scrollFrames = new WeakMap();
+      const renderedTokenText = new WeakMap();
+      let memoryRefreshPromise = null;
+      let lastMemoryRefreshAt = 0;
 
       function freshActive() {
         return {
@@ -1637,6 +1715,7 @@
           generatedTokens: 0,
           tokensPerSecond: null,
           elapsedSeconds: null,
+          phaseError: null,
           done: false,
           failed: false
         };
@@ -1661,7 +1740,8 @@
           doSample: elements.doSample.checked,
           temperature: elements.temperature.value,
           topP: elements.topP.value,
-          topK: elements.topK.value
+          topK: elements.topK.value,
+          keepModelLoaded: elements.keepModelLoaded.checked
         };
         localStorage.setItem(storageKey, JSON.stringify(data));
       }
@@ -1764,6 +1844,27 @@
       function formatNumber(value, digits = 0) {
         const number = Number(value);
         return Number.isFinite(number) ? number.toLocaleString(undefined, { maximumFractionDigits: digits }) : "—";
+      }
+
+      function finiteNumber(value) {
+        if (value === null || value === undefined || value === "") return null;
+        const number = Number(value);
+        return Number.isFinite(number) ? number : null;
+      }
+
+      function setCapacityBar(bar, fill, value, maximum) {
+        const current = finiteNumber(value);
+        const total = finiteNumber(maximum);
+        const ratio = current !== null && total !== null && total > 0 ? Math.min(100, Math.max(0, current / total * 100)) : 0;
+        fill.style.width = `${ratio}%`;
+        if (current === null || total === null || total <= 0) {
+          bar.removeAttribute("aria-valuenow");
+          bar.removeAttribute("aria-valuemax");
+        } else {
+          bar.setAttribute("aria-valuemin", "0");
+          bar.setAttribute("aria-valuenow", String(Math.round(current)));
+          bar.setAttribute("aria-valuemax", String(Math.round(total)));
+        }
       }
 
       function selectedModel() {
@@ -2164,6 +2265,19 @@
         renderFiles();
       }
 
+      function clipboardImages(clipboardData) {
+        if (!clipboardData) return [];
+        const items = Array.from(clipboardData.items || []);
+        const itemImages = items.filter(item => item.kind === "file" && item.type.startsWith("image/")).map(item => item.getAsFile()).filter(Boolean);
+        const blobs = itemImages.length ? itemImages : Array.from(clipboardData.files || []).filter(file => file.type.startsWith("image/"));
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        return blobs.map((blob, index) => {
+          if (blob.name && !/^image\.(png|jpe?g|webp|gif)$/i.test(blob.name)) return blob;
+          const subtype = String(blob.type || "image/png").split("/")[1].split("+")[0].replace("jpeg", "jpg") || "png";
+          return new File([blob], `clipboard-${stamp}-${index + 1}.${subtype}`, { type: blob.type || "image/png", lastModified: Date.now() });
+        });
+      }
+
       function renderFiles() {
         elements.filePreviews.replaceChildren();
         state.files.forEach((item, index) => {
@@ -2175,6 +2289,8 @@
             visual.preload = "metadata";
           } else {
             visual.alt = item.file.name;
+            visual.decoding = "async";
+            visual.draggable = false;
           }
           const remove = node("button", "file-remove", "×");
           remove.type = "button";
@@ -2224,6 +2340,9 @@
         elements.modelSelect.disabled = Boolean(status.loading || state.generating);
         elements.placementSelect.disabled = Boolean(status.loading || state.generating);
         elements.loadButton.textContent = status.loading ? "Loading…" : loaded && String(status.model_id) === elements.modelSelect.value && String(status.placement || "") === elements.placementSelect.value ? "Reload" : "Load";
+        if (!state.retentionPending && status.keep_model_loaded !== undefined) elements.keepModelLoaded.checked = Boolean(status.keep_model_loaded);
+        elements.keepModelLoaded.disabled = state.retentionPending;
+        renderCapacity();
         updateSendState();
       }
 
@@ -2237,11 +2356,19 @@
         }
       }
 
+      function refreshMemoryThrottled() {
+        if (memoryRefreshPromise || Date.now() - lastMemoryRefreshAt < 1250) return memoryRefreshPromise;
+        lastMemoryRefreshAt = Date.now();
+        memoryRefreshPromise = refreshMemory().finally(() => { memoryRefreshPromise = null; });
+        return memoryRefreshPromise;
+      }
+
       function renderMemory() {
         const memory = state.memory || {};
         const gpus = Array.isArray(memory.gpus) ? memory.gpus : [];
         elements.rssValue.textContent = `RSS ${readableMiB(memory.rss_mib)}`;
         elements.gpuList.replaceChildren();
+        renderCapacity();
         if (!gpus.length) {
           elements.resourceSummary.textContent = "CPU";
           elements.gpuList.append(node("div", "resource-empty", "No visible GPU memory data"));
@@ -2249,7 +2376,7 @@
         }
         const used = gpus.reduce((sum, gpu) => sum + Number(gpu.used_mib || 0), 0);
         const total = gpus.reduce((sum, gpu) => sum + Number(gpu.total_mib || 0), 0);
-        elements.resourceSummary.textContent = `${readableMiB(used)} / ${readableMiB(total)}`;
+        elements.resourceSummary.textContent = `${readableMiB(Math.max(0, total - used))} free`;
         for (const gpu of gpus) {
           const usedMiB = Number(gpu.used_mib || 0);
           const totalMiB = Number(gpu.total_mib || 0);
@@ -2271,6 +2398,49 @@
         }
       }
 
+      function renderCapacity() {
+        const status = state.status || {};
+        const memory = state.memory || {};
+        const active = state.active || {};
+        const contextTotal = finiteNumber(first(status, ["context_tokens"], active.contextTokens));
+        const derivedContextUsed = finiteNumber(active.promptTokens) === null
+          ? null
+          : Number(active.promptTokens) + (finiteNumber(active.generatedTokens) || 0);
+        const contextUsed = finiteNumber(first(status, ["context_used_tokens"], derivedContextUsed));
+        const derivedContextHeadroom = contextTotal !== null && contextUsed !== null ? Math.max(0, contextTotal - contextUsed) : null;
+        const contextHeadroom = finiteNumber(first(status, ["token_headroom"], derivedContextHeadroom));
+        const memoryHeadroom = finiteNumber(first(memory, ["estimated_token_headroom"], null));
+        const estimatedHeadroom = contextHeadroom === null
+          ? memoryHeadroom
+          : memoryHeadroom === null
+            ? contextHeadroom
+            : Math.min(contextHeadroom, memoryHeadroom);
+        if (contextTotal !== null && contextUsed !== null) {
+          elements.contextCapacityValue.textContent = `${formatNumber(contextUsed)} / ${formatNumber(contextTotal)} tokens`;
+        } else if (contextTotal !== null) {
+          elements.contextCapacityValue.textContent = `${formatNumber(contextTotal)} token limit`;
+        } else {
+          elements.contextCapacityValue.textContent = "Awaiting prompt";
+        }
+        setCapacityBar(elements.contextCapacityBar, elements.contextCapacityFill, contextUsed, contextTotal);
+        const gpus = Array.isArray(memory.gpus) ? memory.gpus : [];
+        const totalVram = gpus.reduce((sum, gpu) => sum + (finiteNumber(gpu.total_mib) || 0), 0);
+        const freeVram = gpus.reduce((sum, gpu) => {
+          const explicit = finiteNumber(gpu.free_mib);
+          const total = finiteNumber(gpu.total_mib) || 0;
+          const used = finiteNumber(gpu.used_mib) || 0;
+          return sum + (explicit === null ? Math.max(0, total - used) : explicit);
+        }, 0);
+        elements.vramCapacityValue.textContent = totalVram > 0 ? `${readableMiB(freeVram)} / ${readableMiB(totalVram)} free` : "Awaiting GPU";
+        setCapacityBar(elements.vramCapacityBar, elements.vramCapacityFill, totalVram > 0 ? freeVram : null, totalVram || null);
+        const headroomParts = [];
+        if (contextHeadroom !== null) headroomParts.push(`${formatNumber(contextHeadroom)} context`);
+        if (memoryHeadroom !== null) headroomParts.push(`~${formatNumber(memoryHeadroom)} VRAM`);
+        elements.tokenHeadroomValue.textContent = headroomParts.length ? `${headroomParts.join(" · ")} left` : "Awaiting estimate";
+        setCapacityBar(elements.tokenHeadroomBar, elements.tokenHeadroomFill, estimatedHeadroom, contextTotal);
+        elements.tokenHeadroomFill.classList.toggle("warn", estimatedHeadroom !== null && contextTotal !== null && estimatedHeadroom / contextTotal < .15);
+      }
+
       async function loadModel(silent = false) {
         const modelId = elements.modelSelect.value;
         if (!modelId) throw new Error("No model is available");
@@ -2279,10 +2449,10 @@
         elements.connectionDot.className = "status-dot busy";
         elements.connectionText.textContent = "Loading model";
         try {
-          const data = await request("/api/load", { method: "POST", json: { model_id: modelId, placement: elements.placementSelect.value } });
+          const data = await request("/api/load", { method: "POST", json: { model_id: modelId, placement: elements.placementSelect.value, keep_model_loaded: elements.keepModelLoaded.checked } });
           if (data && typeof data === "object") state.status = { ...state.status, ...data };
           await Promise.all([refreshStatus(), refreshMemory()]);
-          if (!silent) toast("Model loaded", "success");
+          if (!silent) toast(elements.keepModelLoaded.checked ? "Model loaded" : "Model checked and released", "success");
         } catch (error) {
           await refreshStatus();
           throw error;
@@ -2299,7 +2469,28 @@
         }
       }
 
+      async function setRetention() {
+        const desired = elements.keepModelLoaded.checked;
+        const previous = Boolean(state.status && state.status.keep_model_loaded);
+        state.retentionPending = true;
+        renderStatus();
+        try {
+          const data = await request("/api/retention", { method: "POST", json: { keep_model_loaded: desired } });
+          const status = unwrap(data, "status") || data || {};
+          state.status = { ...state.status, ...status, keep_model_loaded: desired };
+          saveSettings();
+          toast(desired ? "Model will stay on GPU" : "Model will unload after inference", "success");
+        } catch (error) {
+          elements.keepModelLoaded.checked = previous;
+          toast(error.message, "error");
+        } finally {
+          state.retentionPending = false;
+          renderStatus();
+        }
+      }
+
       async function ensureModel() {
+        if (!elements.keepModelLoaded.checked) return;
         const status = state.status || {};
         const matches = status.loaded && String(status.model_id) === elements.modelSelect.value && (!status.placement || String(status.placement) === elements.placementSelect.value);
         if (!matches) await loadModel(true);
@@ -2361,6 +2552,7 @@
           form.append("temperature", elements.temperature.value);
           form.append("top_p", elements.topP.value);
           form.append("top_k", elements.topK.value);
+          form.append("keep_model_loaded", String(elements.keepModelLoaded.checked));
           for (const item of state.files) form.append("files", item.file, item.file.name);
           saveSettings();
           const response = await fetch("/api/chat", { method: "POST", body: form, signal: controller.signal });
@@ -2441,18 +2633,25 @@
           metric.append(node("div", "live-metric-label", label), node("div", "live-metric-value", value === null || value === undefined ? "—" : value));
           elements.liveMetrics.append(metric);
         }
+        renderCapacity();
         const hasStructured = active.structured !== null && active.structured !== undefined;
         elements.structuredPanel.hidden = !hasStructured;
         if (hasStructured) elements.structuredContent.textContent = structuredText(active.structured);
       }
 
       function renderTokenArea(target, value, placeholder) {
-        if (value) target.textContent = value;
+        const rendered = value || "";
+        if (renderedTokenText.get(target) === rendered) return;
+        const follow = wantsScrollFollow(target);
+        const scrollTop = target.scrollTop;
+        if (rendered) target.textContent = rendered;
         else {
           target.replaceChildren();
           target.append(node("span", "pane-placeholder", placeholder));
         }
-        target.scrollTop = target.scrollHeight;
+        renderedTokenText.set(target, rendered);
+        if (follow) queueScrollBottom(target, false);
+        else target.scrollTop = scrollTop;
       }
 
       function handleEvent(event, eventName) {
@@ -2484,16 +2683,24 @@
           if (elements.generationCard.hidden) beginGeneration("Prompt ready");
           assignActive(event);
           state.active.stage = "Generating";
+          refreshMemoryThrottled();
         } else if (type === "token") {
           if (elements.generationCard.hidden) beginGeneration("Generating");
           const delta = String(first(event, ["delta", "text", "token", "content"], ""));
-          const phase = String(first(event, ["phase", "channel"], "answer"));
-          if (phase === "reasoning" || phase === "thinking") state.active.reasoning += delta;
-          else state.active.answer += delta;
+          const phase = String(first(event, ["phase"], "")).trim().toLowerCase();
+          if (phase === "reasoning") state.active.reasoning += delta;
+          else if (phase === "answer") state.active.answer += delta;
+          else if (!state.active.phaseError) {
+            state.active.phaseError = phase || "missing";
+            state.active.stage = `Stream protocol error · unknown phase ${state.active.phaseError}`;
+            toast(`Ignored token with unknown SSE phase: ${state.active.phaseError}`, "error");
+          }
           state.active.generatedTokens = Number(first(event, ["generated_tokens"], state.active.generatedTokens)) || state.active.generatedTokens;
-          state.active.stage = phase === "reasoning" ? "Thinking" : "Answering";
+          if (phase === "reasoning") state.active.stage = "Thinking";
+          else if (phase === "answer") state.active.stage = "Answering";
         } else if (type === "stats_live") {
           assignActive(event);
+          refreshMemoryThrottled();
         } else if (type === "done") {
           const result = event.result || event;
           assignActive(result);
@@ -2632,10 +2839,44 @@
         elements.resetButton.disabled = !state.currentSessionId || state.generating;
       }
 
+      function distanceFromBottom(target) {
+        return Math.max(0, target.scrollHeight - target.scrollTop - target.clientHeight);
+      }
+
+      function watchScrollTarget(target, threshold) {
+        const follower = { follow: distanceFromBottom(target) <= threshold, threshold };
+        scrollFollowers.set(target, follower);
+        target.addEventListener("scroll", () => {
+          follower.follow = distanceFromBottom(target) <= follower.threshold;
+        }, { passive: true });
+        target.addEventListener("wheel", event => {
+          if (event.deltaY < 0) follower.follow = false;
+        }, { passive: true });
+      }
+
+      function wantsScrollFollow(target) {
+        const follower = scrollFollowers.get(target);
+        return follower ? follower.follow : distanceFromBottom(target) <= 32;
+      }
+
+      function queueScrollBottom(target, force) {
+        const follower = scrollFollowers.get(target);
+        if (!force && follower && !follower.follow) return;
+        if (force && follower) follower.follow = true;
+        const previous = scrollFrames.get(target);
+        if (previous !== undefined) cancelAnimationFrame(previous);
+        const frame = requestAnimationFrame(() => {
+          scrollFrames.delete(target);
+          const current = scrollFollowers.get(target);
+          if (!force && current && !current.follow) return;
+          target.scrollTop = target.scrollHeight;
+          if (current) current.follow = true;
+        });
+        scrollFrames.set(target, frame);
+      }
+
       function scrollBottom(force = true) {
-        const region = elements.scrollRegion;
-        const nearBottom = region.scrollHeight - region.scrollTop - region.clientHeight < 180;
-        if (force || nearBottom) requestAnimationFrame(() => { region.scrollTop = region.scrollHeight; });
+        queueScrollBottom(elements.scrollRegion, force);
       }
 
       async function copyText(textValue) {
@@ -2696,6 +2937,7 @@
         if (saved.temperature !== undefined) elements.temperature.value = saved.temperature;
         if (saved.topP !== undefined) elements.topP.value = saved.topP;
         if (saved.topK !== undefined) elements.topK.value = saved.topK;
+        if (saved.keepModelLoaded !== undefined) elements.keepModelLoaded.checked = Boolean(saved.keepModelLoaded);
       }
 
       async function bootstrap() {
@@ -2738,6 +2980,9 @@
       }
 
       function bindEvents() {
+        watchScrollTarget(elements.scrollRegion, 120);
+        watchScrollTarget(elements.liveAnswer, 32);
+        watchScrollTarget(elements.liveReasoning, 32);
         elements.mobileMenuButton.addEventListener("click", openSidebar);
         elements.backdrop.addEventListener("click", closeSidebar);
         elements.newChatButton.addEventListener("click", async () => {
@@ -2750,6 +2995,7 @@
         elements.sessionSearch.addEventListener("input", () => { state.search = elements.sessionSearch.value; renderSessions(); });
         elements.modelSelect.addEventListener("change", () => { updatePlacements(); saveSettings(); });
         elements.placementSelect.addEventListener("change", saveSettings);
+        elements.keepModelLoaded.addEventListener("change", setRetention);
         elements.loadButton.addEventListener("click", () => loadModel().catch(error => toast(error.message, "error")));
         elements.unloadButton.addEventListener("click", unloadModel);
         elements.resetButton.addEventListener("click", resetSession);
@@ -2767,18 +3013,21 @@
         });
         elements.fileInput.addEventListener("change", () => { addFiles(elements.fileInput.files); elements.fileInput.value = ""; });
         let dragDepth = 0;
+        const hasDraggedFiles = event => Array.from(event.dataTransfer && event.dataTransfer.types || []).includes("Files");
         window.addEventListener("dragenter", event => {
-          if (!Array.from(event.dataTransfer && event.dataTransfer.types || []).includes("Files")) return;
+          if (!hasDraggedFiles(event)) return;
           event.preventDefault();
           dragDepth += 1;
           showDropzone(true);
           elements.dropzone.classList.add("dragging");
         });
         window.addEventListener("dragover", event => {
+          if (!hasDraggedFiles(event)) return;
           if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
           event.preventDefault();
         });
         window.addEventListener("dragleave", event => {
+          if (!dragDepth) return;
           event.preventDefault();
           dragDepth = Math.max(0, dragDepth - 1);
           if (!dragDepth) {
@@ -2787,11 +3036,27 @@
           }
         });
         window.addEventListener("drop", event => {
+          if (!hasDraggedFiles(event)) return;
           event.preventDefault();
           dragDepth = 0;
           elements.dropzone.classList.remove("dragging");
           showDropzone(false);
           addFiles(event.dataTransfer.files);
+        });
+        window.addEventListener("dragend", () => {
+          dragDepth = 0;
+          elements.dropzone.classList.remove("dragging");
+        });
+        window.addEventListener("blur", () => {
+          dragDepth = 0;
+          elements.dropzone.classList.remove("dragging");
+        });
+        document.addEventListener("paste", event => {
+          const images = clipboardImages(event.clipboardData);
+          if (!images.length) return;
+          event.preventDefault();
+          addFiles(images);
+          toast(`${images.length} clipboard image${images.length === 1 ? "" : "s"} added`, "success");
         });
         elements.sendButton.addEventListener("click", sendChat);
         elements.stopButton.addEventListener("click", stopGeneration);

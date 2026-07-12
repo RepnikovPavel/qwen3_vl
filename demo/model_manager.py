@@ -23,6 +23,105 @@ class DemoBusyError(RuntimeError):
     pass
 
 
+def _cuda_index(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value
+    device_type = getattr(value, "type", None)
+    if device_type == "cuda":
+        index = getattr(value, "index", None)
+        return 0 if index is None else int(index)
+    text = str(value)
+    if text == "cuda":
+        return 0
+    if text.startswith("cuda:") and text[5:].isdigit():
+        return int(text[5:])
+    if text.isdigit():
+        return int(text)
+    return None
+
+
+def _runtime_layer_counts(runtime: Any, hidden_layers: int) -> dict[int, int]:
+    counts: dict[int, int] = {}
+    device_map = getattr(runtime, "hf_device_map", None)
+    if isinstance(device_map, dict):
+        for name, device in device_map.items():
+            marker = ".layers."
+            if marker not in name:
+                continue
+            suffix = name.split(marker, 1)[1]
+            if not suffix.isdigit():
+                continue
+            index = _cuda_index(device)
+            if index is not None:
+                counts[index] = counts.get(index, 0) + 1
+    if counts:
+        return counts
+    model = runtime.model
+    core = getattr(model, "model", model)
+    language_model = getattr(core, "language_model", None)
+    layers = getattr(language_model, "layers", None)
+    if layers is not None:
+        for layer in layers:
+            parameter = next(layer.parameters(), None)
+            index = _cuda_index(parameter.device) if parameter is not None else None
+            if index is not None:
+                counts[index] = counts.get(index, 0) + 1
+    if counts:
+        return counts
+    embedding = model.get_input_embeddings()
+    parameter = next(embedding.parameters(), None)
+    index = _cuda_index(parameter.device) if parameter is not None else None
+    return {index: hidden_layers} if index is not None else {}
+
+
+def _estimate_token_headroom(
+    runtime: Any | None,
+    gpus: list[dict[str, Any]],
+) -> tuple[int | None, int | None]:
+    if runtime is None or not gpus:
+        return None, None
+    config = runtime.model.config.get_text_config()
+    hidden_layers = int(getattr(config, "num_hidden_layers", 0) or 0)
+    kv_heads = int(getattr(config, "num_key_value_heads", 0) or 0)
+    head_dim = int(getattr(config, "head_dim", 0) or 0)
+    dtype = str(getattr(config, "dtype", "")).lower()
+    if not hidden_layers or not kv_heads or not head_dim:
+        return None, None
+    if "bfloat16" in dtype or "float16" in dtype:
+        element_bytes = 2
+    elif "float32" in dtype:
+        element_bytes = 4
+    else:
+        return None, None
+    layer_counts = _runtime_layer_counts(runtime, hidden_layers)
+    by_index = {int(gpu["index"]): gpu for gpu in gpus}
+    estimates: dict[int, int] = {}
+    per_layer_bytes = 2 * kv_heads * head_dim * element_bytes
+    for index, layer_count in layer_counts.items():
+        gpu = by_index.get(index)
+        if gpu is None or layer_count <= 0:
+            return None, None
+        total_mib = float(gpu["total_mib"])
+        free_mib = float(gpu["free_mib"])
+        allocated_mib = float(gpu["process_allocated_mib"])
+        reserved_mib = float(gpu["process_reserved_mib"])
+        reusable_mib = max(0.0, reserved_mib - allocated_mib)
+        safety_mib = max(3072.0, total_mib * 0.15)
+        usable_bytes = max(0.0, free_mib + reusable_mib - safety_mib) * 1024**2
+        growth_bytes = per_layer_bytes * layer_count * 2.0
+        estimates[index] = int(usable_bytes / growth_bytes)
+        gpu["kv_layers"] = layer_count
+        gpu["estimated_additional_tokens"] = estimates[index]
+    if not estimates:
+        return None, None
+    bottleneck = min(estimates, key=estimates.get)
+    context_limit = int(getattr(config, "max_position_embeddings", 0) or 0)
+    estimate = estimates[bottleneck]
+    if context_limit:
+        estimate = min(estimate, context_limit)
+    return estimate, bottleneck
+
+
 def _current_rss_mib() -> float:
     try:
         for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
@@ -52,6 +151,7 @@ class DemoModelManager:
         self._runtime: Any | None = None
         self._model_size: str | None = None
         self._placement: str | None = None
+        self._keep_model_loaded = False
         self._last_used = time.monotonic()
         self._load_started: float | None = None
         self._lease = threading.Lock()
@@ -85,24 +185,52 @@ class DemoModelManager:
                 self._lease.release()
 
     @contextmanager
-    def operation(self) -> Iterator[None]:
+    def operation(self, *, auto_unload: bool = False) -> Iterator[None]:
         self.acquire()
         try:
             yield
         finally:
-            self.release()
+            self.release(auto_unload=auto_unload)
 
     def acquire(self) -> None:
         if not self._lease.acquire(blocking=False):
             raise DemoBusyError("the FP8 model is busy")
 
-    def release(self) -> None:
-        self.touch()
-        self._lease.release()
+    def release(self, *, auto_unload: bool = False) -> bool:
+        unloaded = False
+        with self._state_lock:
+            try:
+                self._last_used = time.monotonic()
+                if auto_unload and not self._keep_model_loaded:
+                    unloaded = self._unload_locked()
+            finally:
+                self._lease.release()
+        return unloaded
 
     def touch(self) -> None:
         with self._state_lock:
             self._last_used = time.monotonic()
+
+    def set_keep_model_loaded(
+        self,
+        keep_model_loaded: bool,
+        *,
+        unload_if_idle: bool = True,
+    ) -> bool:
+        keep = bool(keep_model_loaded)
+        with self._state_lock:
+            self._keep_model_loaded = keep
+        if keep or not unload_if_idle:
+            return False
+        if not self._lease.acquire(blocking=False):
+            return False
+        try:
+            with self._state_lock:
+                if self._keep_model_loaded:
+                    return False
+                return self._unload_locked()
+        finally:
+            self._lease.release()
 
     def models(self) -> list[dict[str, Any]]:
         visible_gpus = self._visible_gpu_count()
@@ -226,6 +354,14 @@ class DemoModelManager:
                 "idle_timeout_seconds": self.idle_seconds,
                 "device": "cuda_fp8",
                 "visible_gpus": self._visible_gpu_count(),
+                "keep_model_loaded": self._keep_model_loaded,
+                "auto_unload_after_generation": not self._keep_model_loaded,
+                "unload_policy": (
+                    "keep_loaded" if self._keep_model_loaded else "after_generation"
+                ),
+                "unload_pending": (
+                    loaded and not self._keep_model_loaded and self.busy
+                ),
             }
             if loaded:
                 value.update(
@@ -244,6 +380,8 @@ class DemoModelManager:
 
     def memory(self) -> dict[str, Any]:
         gpus: list[dict[str, Any]] = []
+        with self._state_lock:
+            runtime = self._runtime
         try:
             import torch
 
@@ -267,7 +405,21 @@ class DemoModelManager:
                     )
         except (ImportError, RuntimeError, OSError):
             gpus = []
-        return {"rss_mib": round(_current_rss_mib(), 1), "gpus": gpus}
+        try:
+            estimate, bottleneck = _estimate_token_headroom(runtime, gpus)
+        except (AttributeError, KeyError, TypeError, ValueError, RuntimeError):
+            estimate, bottleneck = None, None
+        return {
+            "rss_mib": round(_current_rss_mib(), 1),
+            "gpus": gpus,
+            "estimated_token_headroom": estimate,
+            "capacity_bottleneck_gpu": bottleneck,
+            "estimated_token_headroom_basis": (
+                "current_free_vram_conservative_dynamic_cache"
+                if estimate is not None
+                else None
+            ),
+        }
 
     def _unload_locked(self) -> bool:
         runtime = self._runtime
@@ -297,12 +449,16 @@ class DemoModelManager:
             with self._state_lock:
                 expired = (
                     self._runtime is not None
+                    and not self._keep_model_loaded
                     and time.monotonic() - self._last_used >= self.idle_seconds
                 )
             if expired and self._lease.acquire(blocking=False):
                 try:
                     with self._state_lock:
-                        if time.monotonic() - self._last_used >= self.idle_seconds:
+                        if (
+                            not self._keep_model_loaded
+                            and time.monotonic() - self._last_used >= self.idle_seconds
+                        ):
                             self._unload_locked()
                 finally:
                     self._lease.release()

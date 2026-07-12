@@ -235,6 +235,12 @@ class LoadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model_id: str
     placement: str = "single"
+    keep_model_loaded: bool = False
+
+
+class RetentionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    keep_model_loaded: bool = False
 
 
 class CreateSessionRequest(BaseModel):
@@ -530,16 +536,45 @@ def create_app(
 
     @app.post("/api/load")
     def load(request: LoadRequest):
+        runtime = None
+        acquired = False
         try:
-            with manager.operation():
-                runtime = manager.load(request.model_id, request.placement)
-            return {
+            manager.acquire()
+            acquired = True
+            manager.set_keep_model_loaded(
+                request.keep_model_loaded,
+                unload_if_idle=False,
+            )
+            runtime = manager.load(request.model_id, request.placement)
+            response = {
                 "ok": True,
                 "model_id": runtime.model_size,
                 "repo_id": runtime.spec.repo_id,
                 "placement": runtime.gpu_placement,
                 "load_seconds": runtime.load_seconds,
+                "keep_model_loaded": request.keep_model_loaded,
             }
+            runtime = None
+            try:
+                response["unloaded"] = manager.release(auto_unload=True)
+            finally:
+                acquired = False
+            return response
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        finally:
+            if acquired:
+                runtime = None
+                try:
+                    manager.release(auto_unload=True)
+                except Exception:
+                    LOGGER.exception("model cleanup failed")
+
+    @app.post("/api/retention")
+    def retention(request: RetentionRequest):
+        try:
+            manager.set_keep_model_loaded(request.keep_model_loaded)
+            return manager.status()
         except Exception as exc:
             raise _http_error(exc) from exc
 
@@ -650,6 +685,7 @@ def create_app(
         temperature: float = Form(0.6),
         top_p: float = Form(0.95),
         top_k: int = Form(20),
+        keep_model_loaded: bool = Form(False),
         files: list[UploadFile] | None = File(None),
     ):
         acquired = False
@@ -699,6 +735,10 @@ def create_app(
                     uploaded_this_request = True
                 manager.acquire()
                 acquired = True
+                manager.set_keep_model_loaded(
+                    keep_model_loaded,
+                    unload_if_idle=False,
+                )
                 generation = Generation(
                     session_id,
                     resolved["prompt"],
@@ -710,6 +750,15 @@ def create_app(
                     generations[session_id] = generation
 
             def worker() -> None:
+                runtime = None
+                completed: (
+                    tuple[
+                        DemoGenerationResult,
+                        dict[str, Any] | None,
+                    ]
+                    | None
+                ) = None
+                failure: str | None = None
                 try:
                     generation.emit({"type": "loading", "state": "loading_model"})
                     runtime = manager.load(model_key, placement)
@@ -772,12 +821,21 @@ def create_app(
                             "structured": structured,
                         },
                     )
-                    generation.complete(result, structured)
+                    completed = (result, structured)
                 except Exception as exc:
                     LOGGER.exception("generation failed")
-                    generation.fail(f"{type(exc).__name__}: generation failed")
+                    failure = f"{type(exc).__name__}: generation failed"
                 finally:
-                    manager.release()
+                    runtime = None
+                    try:
+                        manager.release(auto_unload=True)
+                    except Exception as exc:
+                        LOGGER.exception("model cleanup failed")
+                        failure = f"{type(exc).__name__}: model cleanup failed"
+                if failure is not None:
+                    generation.fail(failure)
+                elif completed is not None:
+                    generation.complete(*completed)
 
             worker_thread = threading.Thread(target=worker, daemon=True)
             generation.worker_thread = worker_thread
@@ -799,7 +857,7 @@ def create_app(
             raise _http_error(exc) from exc
         finally:
             if acquired:
-                manager.release()
+                manager.release(auto_unload=True)
             if uploaded_this_request and not handed_to_worker:
                 cleanup_paths = store.reset_conversation(session_id)
                 _remove_paths(cleanup_paths, media_root)
