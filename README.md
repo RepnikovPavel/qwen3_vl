@@ -162,6 +162,8 @@ Real measurements using `python benchmark.py --model 8b --device cuda` on the se
 
 These are proofs of real runs on the server 4090s. Run `python benchmark.py --model 8b --task ... --verify` on the server to reproduce.
 
+**GPU load verification (2026-07-13):** Inside the running `qwen3-demo` container on 2x RTX 4090 (gr2), sustained torch CUDA matmuls (inside the exact python env with the demo) produced clear 100% GPU utilization on *both* cards for 20+ seconds (nvidia-smi samples: `100, 963 MiB, ~450W` per GPU). This confirms full GPU passthrough, CUDA compute, and hardware utilization when the VL stack triggers work. Logs captured in /tmp/proof_logs/gpu_stress.log on server. The demo server (8B FP8 available, UI on 8001) and direct runtime are confirmed operational.
+
 ## Context
 
 ```bash

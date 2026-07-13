@@ -10,7 +10,7 @@ import json
 import platform
 import statistics
 import subprocess
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
@@ -356,7 +356,7 @@ def run_benchmark(args) -> dict[str, object]:
     git_commit, git_dirty = _git_state()
     return {
         "schema_version": SCHEMA_VERSION,
-        "created_at_utc": datetime.now(UTC).isoformat(),
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "git_commit": git_commit,
         "git_dirty": git_dirty,
         "runtime_source_sha256": _runtime_source_sha256(),
