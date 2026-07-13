@@ -807,6 +807,65 @@
       margin-left: 36px;
     }
 
+    /* New split layout for large input visual on left, reasoning/chat on right */
+    .generation-split {
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
+      gap: 12px;
+      margin-left: 36px;
+      align-items: start;
+    }
+
+    .input-pane {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(17, 21, 29, .74);
+      overflow: hidden;
+    }
+
+    .input-pane .pane-head {
+      padding: 8px 12px;
+      font-size: 11px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .input-pane .pane-content {
+      max-height: 72vh;
+      min-height: 300px;
+      padding: 8px;
+      background: #05070a;
+    }
+
+    .input-pane .pane-content img,
+    .input-pane .pane-content video {
+      width: 100%;
+      height: auto;
+      max-height: 68vh;
+      object-fit: contain;
+      display: block;
+      background: #000;
+    }
+
+    .reasoning-pane {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .reasoning-pane .response-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 160px;
+    }
+
+    .reasoning-pane .pane-content {
+      flex: 1;
+      min-height: 120px;
+    }
+
     .response-pane {
       min-width: 0;
       overflow: hidden;
@@ -1207,7 +1266,7 @@
     }
 
     .custom-prompt {
-      display: none;
+      display: block; /* always visible: user can enter/edit any prompt for image/video (boxes, points, graph, matching, lanes etc.) */
       width: calc(100% - 24px);
       min-height: 72px;
       max-height: 180px;
@@ -1220,10 +1279,6 @@
       background: #0d1118;
       outline: 0;
       line-height: 1.5;
-    }
-
-    .custom-prompt.visible {
-      display: block;
     }
 
     .composer-main {
@@ -1426,11 +1481,19 @@
       .generation-grid .visual-pane {
         grid-column: 1 / -1;
       }
+
+      .generation-split {
+        grid-template-columns: 1fr;
+      }
     }
 
     @media (max-width: 900px) {
       .assistant-grid,
       .generation-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .generation-split {
         grid-template-columns: 1fr;
       }
 
@@ -1689,19 +1752,22 @@
             <section class="generation-card" id="generationCard" hidden aria-live="polite">
               <div class="generation-top"><span class="pulse"></span><span class="generation-label">Qwen3 VL</span><span class="generation-stage" id="generationStage">Preparing</span></div>
               <div class="live-metrics" id="liveMetrics"></div>
-              <div class="generation-grid">
-                <section class="response-pane visual-pane">
-                  <div class="pane-head"><span>Visual</span></div>
+              <!-- Split layout: left large input visual, right thinking + final answer (chat dialog style) -->
+              <div class="generation-split" id="generationSplit">
+                <div class="input-pane">
+                  <div class="pane-head"><span>Input (full resolution)</span></div>
                   <div class="pane-content" id="liveVisual"><span class="visual-empty">Attached images or video for this request</span></div>
-                </section>
-                <section class="response-pane thinking-pane">
-                  <div class="pane-head"><span>Thinking</span><div class="pane-actions"><button class="pane-action" id="copyLiveReasoning" type="button" aria-label="Copy reasoning">⧉</button></div></div>
-                  <div class="pane-content" id="liveReasoning"><span class="pane-placeholder">Reasoning tokens will appear here</span></div>
-                </section>
-                <section class="response-pane">
-                  <div class="pane-head"><span>Chat</span><div class="pane-actions"><button class="pane-action" id="copyLiveAnswer" type="button" aria-label="Copy answer">⧉</button><button class="pane-action" id="downloadLiveAnswer" type="button" aria-label="Download answer">↓</button></div></div>
-                  <div class="pane-content" id="liveAnswer"><span class="pane-placeholder">Answer tokens will appear here</span></div>
-                </section>
+                </div>
+                <div class="reasoning-pane">
+                  <section class="response-pane thinking-pane">
+                    <div class="pane-head"><span>Thinking</span><div class="pane-actions"><button class="pane-action" id="copyLiveReasoning" type="button" aria-label="Copy reasoning">⧉</button></div></div>
+                    <div class="pane-content" id="liveReasoning"><span class="pane-placeholder">Reasoning tokens will appear here</span></div>
+                  </section>
+                  <section class="response-pane">
+                    <div class="pane-head"><span>Final output</span><div class="pane-actions"><button class="pane-action" id="copyLiveAnswer" type="button" aria-label="Copy answer">⧉</button><button class="pane-action" id="downloadLiveAnswer" type="button" aria-label="Download answer">↓</button></div></div>
+                    <div class="pane-content" id="liveAnswer"><span class="pane-placeholder">Answer tokens will appear here</span></div>
+                  </section>
+                </div>
               </div>
               <section class="structured" id="structuredPanel" hidden>
                 <div class="pane-head"><span>Structured JSON</span><div class="pane-actions"><button class="pane-action" id="copyStructured" type="button" aria-label="Copy JSON">⧉</button><button class="pane-action" id="downloadStructured" type="button" aria-label="Download JSON">↓</button></div></div>
@@ -2077,6 +2143,8 @@
 
       function chooseTask(key, applyDefaults) {
         state.selectedTask = key;
+        // When user deliberately switches task, allow prefill of the new recommended prompt
+        delete elements.customPrompt.dataset.userEdited;
         for (const button of elements.taskRow.querySelectorAll(".task-chip")) {
           const active = button.dataset.task === key;
           button.classList.toggle("active", active);
@@ -2088,11 +2156,14 @@
 
       function updateTaskUI(applyDefaults) {
         const task = selectedTask();
-        const custom = state.selectedTask === "custom" || Boolean(task && task.accepts_custom_prompt);
-        elements.customPrompt.classList.toggle("visible", custom);
+        // Always visible now (see CSS). Prefill with recommended prompt for the task so user has good starting point for lanes/boxes/graph/matching etc.
+        elements.customPrompt.style.display = "block";
         if (applyDefaults && task) {
           if (task.default_max_new_tokens) elements.maxTokens.value = task.default_max_new_tokens;
           if (task.default_max_image_side) elements.maxImageSide.value = task.default_max_image_side;
+        }
+        if (task && task.prompt && !elements.customPrompt.dataset.userEdited) {
+          elements.customPrompt.value = task.prompt;
         }
         const label = task ? task.label || task.key : "vision task";
         elements.composerHint.replaceChildren();
@@ -2104,7 +2175,7 @@
             ? `${existingMedia} saved visual${existingMedia === 1 ? "" : "s"} will be reused`
             : "Add images or video";
         elements.composerHint.append(strong, document.createElement("br"), document.createTextNode(mediaHint));
-        if (custom) elements.customPrompt.focus({ preventScroll: true });
+        elements.customPrompt.focus({ preventScroll: true });
       }
 
       function renderSessions() {
@@ -2771,6 +2842,7 @@
           form.append("temperature", elements.temperature.value);
           form.append("top_p", elements.topP.value);
           form.append("top_k", elements.topK.value);
+          form.append("video_num_frames", "48");  // higher default for video understanding / stream-like clips; tune via future UI control
           form.append("keep_model_loaded", String(elements.keepModelLoaded.checked));
           for (const item of state.files) form.append("files", item.file, item.file.name);
           saveSettings();
@@ -3313,6 +3385,8 @@
             sendChat();
           }
         });
+        // Track manual edits so task switching doesn't overwrite user's custom prompt
+        elements.customPrompt.addEventListener("input", () => { elements.customPrompt.dataset.userEdited = "true"; });
         for (const input of [elements.maxTokens, elements.maxImageSide, elements.doSample, elements.temperature, elements.topP, elements.topK]) input.addEventListener("change", saveSettings);
         elements.copyLiveAnswer.addEventListener("click", () => copyText(state.active.answer));
         elements.downloadLiveAnswer.addEventListener("click", () => downloadText(state.active.answer, "qwen3-vl-answer.txt", "text/plain"));

@@ -150,6 +150,54 @@ _PRESET_ITEMS = (
         default_max_image_side=640,
         accepts_custom_prompt=True,
     ),
+    # Additional presets for full standard Qwen3-VL capabilities (video, documents, spatial, reasoning)
+    # Kept generic.
+    DemoPreset(
+        key="video_understanding",
+        label="Video understanding",
+        prompt=(
+            "Analyze the video in detail. Describe the sequence of events, key actions, objects, "
+            "any visible text or signs, and how the scene evolves over time. Be precise and chronological."
+        ),
+        output_kind="text",
+        default_max_new_tokens=4096,
+        default_max_image_side=640,
+    ),
+    DemoPreset(
+        key="document_parsing",
+        label="Document parsing",
+        prompt=(
+            "Parse the document or screenshot thoroughly. Extract headings, paragraphs, tables "
+            "(as markdown or structured text), lists, key facts, and describe any embedded images or diagrams. "
+            "Preserve logical reading order and structure."
+        ),
+        output_kind="text",
+        default_max_new_tokens=8192,
+        default_max_image_side=1280,
+    ),
+    DemoPreset(
+        key="spatial_understanding",
+        label="Spatial understanding",
+        prompt=(
+            "Describe the scene with focus on spatial layout: positions and relations of objects, "
+            "their orientations, foreground/background ordering, approximate layout, and interactions. "
+            "Use clear directional references."
+        ),
+        output_kind="text",
+        default_max_new_tokens=3072,
+        default_max_image_side=896,
+    ),
+    DemoPreset(
+        key="think_detailed",
+        label="Think step-by-step",
+        prompt=(
+            "Examine the visual input carefully. Think step by step (internal reasoning first), "
+            "then provide a clear, well-structured final answer. Cover observations, ambiguities, and conclusions."
+        ),
+        output_kind="text",
+        default_max_new_tokens=4096,
+        default_max_image_side=640,
+    ),
 )
 
 
@@ -188,9 +236,11 @@ def resolve_task(
                 f"custom_prompt exceeds {MAX_CUSTOM_PROMPT_CHARACTERS} characters"
             )
     else:
-        if custom_prompt is not None and custom_prompt != "":
-            raise DemoTaskError(f"task {key!r} does not accept a custom prompt")
-        prompt = preset.prompt
+        # Allow custom prompt to override even for preset tasks (for free-form detection, lanes, graph etc.)
+        if custom_prompt and custom_prompt.strip():
+            prompt = custom_prompt.strip()
+        else:
+            prompt = preset.prompt
     tokens, side = _validate_limits(
         preset.default_max_new_tokens if max_new_tokens is None else max_new_tokens,
         preset.default_max_image_side if max_image_side is None else max_image_side,

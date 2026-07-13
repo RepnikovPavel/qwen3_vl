@@ -11,13 +11,25 @@ into the image; inference does not fetch kernels or model files.
 ./docker/build.sh
 ```
 
-Override the tag or pinned base only when intentionally testing another image:
+For servers using older CUDA 12.x (common on some 4090-class machines):
+
+```bash
+# Use the cu12 variant (see docker/Dockerfile.cu12)
+QWEN3_CU12=1 \
+QWEN3_IMAGE=qwen3-vl:cu12 \
+QWEN3_BASE_IMAGE=pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime \
+./docker/build.sh
+```
+
+Or override for the main file:
 
 ```bash
 QWEN3_IMAGE=qwen3-vl:test \
 QWEN3_BASE_IMAGE=nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc20@sha256:... \
 ./docker/build.sh
 ```
+
+The build script auto-selects Dockerfile.cu12 when QWEN3_CU12=1 or image name contains "cu12".
 
 ## Host directories
 

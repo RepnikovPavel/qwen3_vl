@@ -102,6 +102,7 @@ def run_streaming_generation(
     top_k: int,
     stop_event: threading.Event,
     emit: Callable[[dict[str, Any]], None],
+    video_num_frames: int = 32,
 ) -> DemoGenerationResult:
     import torch
     from transformers import (
@@ -144,7 +145,8 @@ def run_streaming_generation(
     messages = build_messages(media, prompt, history, media_history_index)
     processor_kwargs: dict[str, Any] = {}
     if any(item.kind == "video" for item in media):
-        processor_kwargs = {"num_frames": 32, "fps": None}
+        num_f = max(2, min(int(video_num_frames), 256))
+        processor_kwargs = {"num_frames": num_f, "fps": None}
     inputs = runtime.processor.apply_chat_template(
         messages,
         tokenize=True,

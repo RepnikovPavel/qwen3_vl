@@ -34,10 +34,16 @@ def _chart(values_key="values"):
 
 class DemoPresetTest(unittest.TestCase):
     def test_registry_is_ordered_immutable_and_has_task_specific_defaults(self):
-        self.assertEqual(
-            list(DEMO_PRESETS),
-            ["describe", "ocr", "formula", "chart", "custom"],
-        )
+        keys = list(DEMO_PRESETS)
+        self.assertIn("describe", keys)
+        self.assertIn("video_understanding", keys)
+        self.assertIn("document_parsing", keys)
+        self.assertIn("spatial_understanding", keys)
+        self.assertIn("think_detailed", keys)
+        self.assertEqual(keys[0], "describe")
+        self.assertEqual(keys[-1], "think_detailed")  # last added
+        self.assertEqual(get_preset("describe").default_max_image_side, 640)
+        self.assertEqual(get_preset("ocr").default_max_image_side, 1280)
         self.assertEqual(get_preset("describe").default_max_image_side, 640)
         self.assertEqual(get_preset("ocr").default_max_image_side, 1280)
         self.assertEqual(get_preset("formula").default_max_new_tokens, 4096)
@@ -54,10 +60,14 @@ class DemoPresetTest(unittest.TestCase):
         rendered = json.dumps(first, ensure_ascii=False)
 
         self.assertEqual(first["schema_version"], 1)
-        self.assertEqual(len(first["tasks"]), 5)
+        self.assertGreaterEqual(len(first["tasks"]), 5)
+        self.assertIn("video_understanding", [t["key"] for t in first["tasks"]])
         self.assertNotIn("ground_truth", rendered)
         self.assertNotIn("image_sha256", rendered)
-        self.assertIsNone(first["tasks"][-1]["prompt"])
+        # custom (or any accepts_custom) has null prompt
+        custom_task = next((t for t in first["tasks"] if t.get("accepts_custom_prompt")), None)
+        self.assertIsNotNone(custom_task)
+        self.assertIsNone(custom_task["prompt"])
         first["tasks"][0]["label"] = "mutated"
         self.assertEqual(public_presets()["tasks"][0]["label"], "Describe")
 

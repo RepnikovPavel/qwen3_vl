@@ -38,6 +38,8 @@ ssh -N -L 8001:127.0.0.1:8001 USER@SERVER
 
 Открыть `http://127.0.0.1:8001`. Только FP8 CUDA; `single` — одна GPU, `balanced` — model-parallel по двум картам. Сессии и media в state-каталоге.
 
+В демо доступны разные задачи (presets) как в стандартных Qwen3-VL примерах: describe, OCR, video understanding, document parsing, spatial understanding, step-by-step reasoning + custom prompt. Поддерживается загрузка изображений и видео (в т.ч. собранных из последовательностей кадров). Для видеопотоков/длинных клипов используйте больше кадров (video_num_frames).
+
 ### Деплой на GPU-сервер (tuna)
 
 ```bash
@@ -113,13 +115,35 @@ python3 evaluate_vl.py --manifest "$EVAL/manifest.json" \
 
 ## Benchmark
 
+Standard latency benchmark (single image):
+
 ```bash
 ./docker/run.sh benchmark --models "$MODELS" --data "$DATA" --output "$RESULTS" -- \
   --model 2b --image /data/scene.jpg --output /output/benchmark_2b_gpu.json
-
-./docker/run.sh benchmark-cpu --models "$MODELS" --data "$DATA" --output "$RESULTS" -- \
-  --model 2b --image /data/scene.jpg --output /output/benchmark_2b_cpu.json
 ```
+
+**New performance tests for typical tasks** (image vs video/stream, 2D/3D detection, graph, matching):
+
+```bash
+# lane detection image vs video (5 frames)
+python benchmark.py --model 8b --task lane_image --runs 3
+python benchmark.py --model 8b --task lane_video --video /data/lane_clip.mp4 --num-frames 5 --runs 3
+
+# standard 2D detection benchmark + structured output timing
+python benchmark.py --model 8b --task 2d_detection --runs 3 --verify
+
+# 3D + entity graph on sequence + object matching on 2/4/8 frames
+python benchmark.py --model 8b --task 3d_detection --verify
+python benchmark.py --model 8b --task entity_graph --num-frames 5 --verify
+python benchmark.py --model 8b --task object_matching --num-frames 8 --verify
+```
+
+The `--verify` flag runs additional checks that outputs contain expected structure/keywords for 3D, graphs, matching etc.
+Times (total_seconds, tokens/s) are reported per task; video/sequence shows overhead vs single image.
+Use repeated images for sequence tests if no multi-frame video available (tests multi-image input + consistency).
+```
+
+The output JSON includes "verification" section with timings and pass/fail for each.
 
 ## Context
 

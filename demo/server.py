@@ -685,6 +685,7 @@ def create_app(
         temperature: float = Form(0.6),
         top_p: float = Form(0.95),
         top_k: int = Form(20),
+        video_num_frames: int = Form(32),
         keep_model_loaded: bool = Form(False),
         files: list[UploadFile] | None = File(None),
     ):
@@ -700,6 +701,9 @@ def create_app(
                     max_new_tokens=max_new_tokens,
                     max_image_side=max_image_side,
                 )
+                # Allow free-form prompt to override the preset for any task.
+                # This enables custom prompts for detection, lane, graph, matching etc.
+                effective_prompt = (custom_prompt or "").strip() or resolved["prompt"]
                 model_key = normalize_model_size(model_id)
                 if placement not in PLACEMENTS:
                     raise ValueError(f"unsupported placement: {placement}")
@@ -709,6 +713,8 @@ def create_app(
                     raise ValueError("top_p must be in (0, 1]")
                 if not 1 <= top_k <= 1000:
                     raise ValueError("top_k must be between 1 and 1000")
+                if not 2 <= video_num_frames <= 256:
+                    raise ValueError("video_num_frames must be between 2 and 256")
                 session = store.get_session(session_id)
                 if session is None:
                     raise HTTPException(404, "session not found")
@@ -790,7 +796,7 @@ def create_app(
                     result = run_streaming_generation(
                         runtime,
                         media_inputs,
-                        resolved["prompt"],
+                        effective_prompt,
                         history,
                         media_history_index,
                         resolved["max_new_tokens"],
@@ -801,6 +807,7 @@ def create_app(
                         top_k,
                         generation.stop_event,
                         generation.emit,
+                        video_num_frames=video_num_frames,
                     )
                     structured = build_structured_result(
                         resolved["task"], result.answer
@@ -812,7 +819,7 @@ def create_app(
                         )
                     store.append_turn(
                         session_id,
-                        resolved["prompt"],
+                        effective_prompt,
                         assistant_content,
                         reasoning=result.reasoning,
                         metrics={
