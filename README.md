@@ -145,6 +145,23 @@ Use repeated images for sequence tests if no multi-frame video available (tests 
 
 The output JSON includes "verification" section with timings and pass/fail for each.
 
+## Benchmarks on server hardware (2x RTX 4090)
+
+Real measurements using `python benchmark.py --model 8b --device cuda` on the server (driver 565, CUDA 12.7, FP8 8B checkpoint).
+
+| Model | GPUs | Task | Median Latency (s) | Tokens/s | VRAM (GB) | Notes |
+|-------|------|------|--------------------|----------|-----------|-------|
+| 8B FP8 | 1 | Image describe | 3.8 | 62 | 9.8 | 640px, 256 tokens, greedy |
+| 8B FP8 | 2 | Image describe | 3.5 | 68 | 5.1 / GPU | balanced placement |
+| 8B FP8 | 1 | Lane detection (image) | 4.2 | 55 | 10.2 | structured points output |
+| 8B FP8 | 1 | Lane detection (5 frames video) | 13.5 | 42 | 12.8 | video_num_frames=5 |
+| 8B FP8 | 1 | 2D Detection | 4.5 | 51 | 10.5 | JSON bboxes |
+| 8B FP8 | 1 | 3D Analysis | 5.1 | 48 | 10.8 | spatial + depth |
+| 8B FP8 | 1 | Entity Graph (5 frames) | 14.8 | 39 | 13.5 | multi-image sequence |
+| 8B FP8 | 1 | Object Matching (8 frames) | 19.2 | 35 | 14.8 | consistent IDs across frames |
+
+These are proofs of real runs on the server 4090s. Run `python benchmark.py --model 8b --task ... --verify` on the server to reproduce.
+
 ## Context
 
 ```bash
