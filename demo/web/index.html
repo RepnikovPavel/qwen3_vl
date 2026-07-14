@@ -452,6 +452,32 @@
       position: relative;
     }
 
+    .chat-skills-upper {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      z-index: 10;
+      display: flex;
+      justify-content: flex-end;
+      width: 620px;
+      min-width: 500px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 4px 6px;
+      max-height: 110px;
+      overflow: hidden;
+    }
+    .skills-upper-right .task-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      padding: 8px 10px 6px;
+      max-height: 80px;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+
     .resource-button {
       white-space: nowrap;
     }
@@ -638,6 +664,7 @@
     }
 
     .conversation-shell {
+      position: relative;
       width: calc(100% - 24px);
       min-height: 100%;
       margin: 0 auto;
@@ -648,6 +675,7 @@
       display: grid;
       min-height: min(280px, calc(100vh - 240px));
       place-items: center;
+      padding-top: 0;
     }
 
     .hero-inner {
@@ -936,14 +964,14 @@
 
     .pane-head {
       display: flex;
-      min-height: 39px;
+      min-height: 28px;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
-      padding: 0 12px;
+      gap: 6px;
+      padding: 0 8px;
       border-bottom: 1px solid var(--line);
       color: var(--muted);
-      font-size: 10px;
+      font-size: 9px;
       font-weight: 800;
       letter-spacing: .1em;
       text-transform: uppercase;
@@ -971,16 +999,16 @@
     }
 
     .pane-content {
-      min-height: 140px;
-      max-height: min(72vh, 820px);
+      min-height: 80px;
+      max-height: min(68vh, 620px);
       overflow: auto;
-      padding: 14px;
+      padding: 8px 10px;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       color: #e8ebf0;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 12px;
-      line-height: 1.65;
+      font-size: 11px;
+      line-height: 1.45;
       scrollbar-width: thin;
       scrollbar-color: #303747 transparent;
       overscroll-behavior: contain;
@@ -1128,7 +1156,7 @@
     .composer-wrap {
       position: relative;
       z-index: 8;
-      padding: 0 18px 17px;
+      padding: 0 18px 8px;
       background: linear-gradient(180deg, transparent, rgba(8, 10, 15, .95) 22%, var(--bg) 46%);
     }
 
@@ -1233,7 +1261,7 @@
       flex-wrap: wrap;
       align-items: center;
       gap: 7px;
-      padding: 11px 12px 8px;
+      padding: 8px 10px 6px;
       overflow: visible;
     }
 
@@ -1268,13 +1296,14 @@
     .custom-prompt {
       display: block; /* always visible: user can enter/edit any prompt for image/video (boxes, points, graph, matching, lanes etc.) */
       width: calc(100% - 24px);
-      min-height: 72px;
-      max-height: 180px;
-      margin: 0 12px 8px;
-      padding: 11px 12px;
+      min-height: 48px;
+      max-height: 120px;
+      margin: 0 12px 4px;
+      padding: 8px 10px;
       resize: vertical;
       border: 1px solid var(--line);
       border-radius: 10px;
+      font-size: 12px;
       color: var(--text);
       background: #0d1118;
       outline: 0;
@@ -1284,8 +1313,8 @@
     .composer-main {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 5px 10px 10px;
+      gap: 6px;
+      padding: 4px 8px 6px;
     }
 
     .attach-button {
@@ -1572,6 +1601,19 @@
         padding-top: 21px;
       }
 
+      .chat-skills-upper {
+        width: 100%;
+        min-width: 0;
+        max-height: none;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px 8px;
+      }
+      .skills-upper-right .task-row {
+        max-height: none;
+        padding: 6px 8px 4px;  /* original-ish */
+      }
+
       .main,
       .workspace,
       .scroll-region,
@@ -1595,6 +1637,17 @@
       .composer-main {
         display: grid;
         grid-template-columns: 31px minmax(0, 1fr) auto;
+      }
+
+      .top-row {
+        flex-direction: column;
+        padding: 4px 8px;
+        gap: 4px;
+      }
+      .top-skills {
+        flex: none;
+        width: 100%;
+        max-height: 48px;
       }
 
       .send-button {
@@ -1735,6 +1788,11 @@
       <section class="workspace">
         <div class="scroll-region" id="scrollRegion">
           <div class="conversation-shell">
+            <div class="chat-skills-upper">
+              <div class="skills-upper-right">
+                <div class="task-row" id="taskRow" aria-label="Task presets"></div>
+              </div>
+            </div>
             <section class="hero" id="hero">
               <div class="hero-inner">
                 <div class="hero-orb" aria-hidden="true">VL</div>
@@ -1780,7 +1838,6 @@
           <section class="composer" id="composer" aria-label="Vision request">
             <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Add visual media">Drop images or video here · paste an image from the clipboard · or click to browse</div>
             <div class="file-previews" id="filePreviews"></div>
-            <div class="task-row" id="taskRow" aria-label="Task presets"></div>
             <label class="sr-only" for="customPrompt">Custom prompt</label>
             <textarea class="custom-prompt" id="customPrompt" placeholder="Tell the model what to inspect…"></textarea>
             <div class="composer-main">

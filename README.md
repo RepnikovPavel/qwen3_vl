@@ -40,18 +40,18 @@ ssh -N -L 8001:127.0.0.1:8001 USER@SERVER
 
 В демо доступны разные задачи (presets) как в стандартных Qwen3-VL примерах: describe, OCR, video understanding, document parsing, spatial understanding, step-by-step reasoning + custom prompt. Поддерживается загрузка изображений и видео (в т.ч. собранных из последовательностей кадров). Для видеопотоков/длинных клипов используйте больше кадров (video_num_frames).
 
-### Деплой на GPU-сервер (tuna)
+### Деплой на GPU-сервер
 
 ```bash
-git clone https://github.com/RepnikovPavel/qwen3_vl.git /mnt/nvme2/qwen3_vl
-cd /mnt/nvme2/qwen3_vl
-export MODELS=/mnt/hdd1/qwen3_models
-export STATE=/mnt/nvme2/qwen3_vl_demo_state
+git clone https://github.com/RepnikovPavel/qwen3_vl.git "$WORK/qwen3_vl"
+cd "$WORK/qwen3_vl"
+export MODELS="$CHECKPOINT_DIR"      # HF cache root with the FP8 snapshots
+export STATE="$WORK/qwen3_vl_demo_state"
 ./docker/build.sh
 ./docker/run_demo.sh "$MODELS" "$STATE" 8001
 ```
 
-С ноутбука: `ssh -N -L 8001:127.0.0.1:8001 tuna-server` → `http://127.0.0.1:8001`. Для быстрой разработки и тестирования используйте **2B FP8** (`--model 2b`). 8B только для финальных бенчмарков и проверок точности.
+С ноутбука: `ssh -N -L 8001:127.0.0.1:8001 USER@SERVER` → `http://127.0.0.1:8001`. Для быстрой разработки и тестирования используйте **2B FP8** (`--model 2b`). 8B только для финальных бенчмарков и проверок точности.
 
 ## GPU FP8 inference
 
@@ -65,7 +65,9 @@ cp /path/to/scene.jpg "$DATA/scene.jpg"
   --prompt "Describe the scene completely and precisely." --require-eos
 ```
 
-Для распределения модели по видимым GPU передайте `--gpu-placement auto`, `balanced` или `balanced_low_0`. Выбор устройств задаётся через `QWEN3_GPUS`.
+Используйте `--gpu-placement single` (по умолчанию и рекомендовано): 2B/8B FP8
+помещаются на одну GPU, и это обходит баг multi-GPU MRoPE в transformers.
+`balanced` (model-parallel по двум картам) доступен, но экспериментален.
 
 ## CPU FP32 inference
 
@@ -145,33 +147,13 @@ Use repeated images for sequence tests if no multi-frame video available (tests 
 
 The output JSON includes "verification" section with timings and pass/fail for each.
 
-## Benchmarks on server hardware (2x RTX 4090)
+## Benchmarks
 
-Real measurements using `python benchmark.py --model 8b --device cuda` on the server (driver 565, CUDA 12.7, FP8 8B checkpoint).
-
-| Model | GPUs | Task | Median Latency (s) | Tokens/s | VRAM (GB) | Notes |
-|-------|------|------|--------------------|----------|-----------|-------|
-| 8B FP8 | 1 | Image describe | 3.8 | 62 | 9.8 | 640px, 256 tokens, greedy |
-| 8B FP8 | 2 | Image describe | 3.5 | 68 | 5.1 / GPU | balanced placement |
-| 8B FP8 | 1 | Lane detection (image) | 4.2 | 55 | 10.2 | structured points output |
-| 8B FP8 | 1 | Lane detection (5 frames video) | 13.5 | 42 | 12.8 | video_num_frames=5 |
-| 8B FP8 | 1 | 2D Detection | 4.5 | 51 | 10.5 | JSON bboxes |
-| 8B FP8 | 1 | 3D Analysis | 5.1 | 48 | 10.8 | spatial + depth |
-| 8B FP8 | 1 | Entity Graph (5 frames) | 14.8 | 39 | 13.5 | multi-image sequence |
-| 8B FP8 | 1 | Object Matching (8 frames) | 19.2 | 35 | 14.8 | consistent IDs across frames |
-
-These are proofs of real runs on the server 4090s. Run `python benchmark.py --model 8b --task ... --verify` on the server to reproduce.
-
-**GPU load verification:** Inside the running `qwen3-demo` container on 2x RTX 4090, sustained torch CUDA matmuls (inside the exact python env with the demo) produced clear 100% GPU utilization on *both* cards for 20+ seconds (nvidia-smi samples showing high util + power). This confirms full GPU passthrough, CUDA compute, and hardware utilization when the VL stack triggers work. The demo server (2B/8B FP8 available, UI on 8001 via tunnel) and direct runtime are confirmed operational.
-
-## 2B vs 8B FP8 Thinking t/s comparison on 100.jpg (balanced placement, yarn_1m, 128 tokens, 3 runs)
-
-| Model | Avg t/s | Median t/s | Notes |
-|-------|---------|------------|-------|
-| 2B FP8 Thinking | 7.9 | 9.2 | faster after warmup, lower mem |
-| 8B FP8 Thinking | 6.4 | 7.2 | higher compute per token |
-
-Measured with `python` direct runtime on the 2x4090 server. 2B allows faster iteration for dev/testing. Use `--model 2b` for dev, 8b for accuracy/hardware proofs.
+Per-skill latency / tokens-per-second / VRAM measurements, reproduced on the GPU server with
+`python benchmark.py --model 2b --skill <key>` (2B FP8 for dev, 8B for final numbers), live in
+[`docs/benchmarks.md`](docs/benchmarks.md). Run `scripts/bench_all_skills.sh` on the server to
+regenerate the table. Skill definitions and prompts come from `skills.py` (see
+[`docs/skills.md`](docs/skills.md)).
 
 ## Context
 
@@ -205,52 +187,3 @@ ruff check --ignore E402 .
 
 Требуется Python 3.12+. Установка entry point без замены NVIDIA packages: `python3 -m pip install --no-deps -e .`.
 
-## Recent server test (2026-07-14, 2x RTX 4090)
-
-**Success: full generation now works on attached image (100.jpg at /state/100.jpg).**
-
-Clean run inside qwen3-demo (vastai base + torch 2.6+cu124 + patched finegrained-fp8 kernel at /tmp/fp8_patched):
-
-- Load 8B FP8: 4.9s (weights 1002 tensors, 252 fp8 scales)
-- Prepare attached /state/100.jpg: SUCCESS, items:1 (no FileNotFound, no path errors)
-- Kernel: local /tmp/fp8_patched injected successfully (after patching batched/grouped/matmul list[int] -> List[int] + future annotations)
-- DISABLE_NETWORK_GUARD=1 + HF_HUB_OFFLINE=0 set before import → no OfflineNetworkError during forward/generation
-- GPU: mem spiked ~10 GiB on GPU0, real utilization during load+infer (nvidia-smi showed high usage); explicit cleanup releases to ~15 MiB idle
-- 3 prompts on the street/car scene image produced sensible outputs (greedy, ~80 tokens each)
-
-Sample real model outputs (verbatim):
-
-Prompt: "Describe this image in detail. Focus on what objects are present, their positions, spatial layout, any text or notable features. Be specific."
-
-=== MODEL OUTPUT ===
-So, let's break down this image. First, it's a street scene taken from inside a car, so the foreground has the car's dashboard and windshield. The view is of a multi-lane urban road. 
-
-Starting with the road: it's a wide avenue with multiple lanes. On the left side, there are several vehicles. A black car is in the left lane, then a
-=== END OUTPUT ===
-t/s: 1.33 (took 60.4 s)
-
-Prompt: "What is the main subject and where is it located relative to other elements?"
-
-=== MODEL OUTPUT ===
-So, let's look at the image. The main subject here is probably the road with vehicles, but wait, the question is about the main subject and its location relative to other elements. Let's break it down.
-
-First, the image is taken from inside a car, so the foreground has the car's dashboard. The main elements are the street, cars, buildings, sky. The main subject
-=== END OUTPUT ===
-t/s: 8.21 (took 9.8 s)
-
-Prompt: "Count visible objects and describe their approximate positions (left, center, right, foreground, background)."
-
-=== MODEL OUTPUT ===
-Got it, let's count the visible objects and describe their positions. First, I need to look at the image from the car's perspective. Let's start with the foreground: the car's hood is visible at the bottom, so that's foreground.
-
-Now, the road has multiple vehicles. Let's list them:
-
-1. Yellow taxi on the left side of the road, middle distance. So
-=== END OUTPUT ===
-t/s: 8.13 (took 9.9 s)
-
-After test: GPU back to 15 MiB idle on both cards. No leaks. Real compute confirmed (load/forward used the patched FP8 Triton kernels).
-
-This resolves the "offline network error: generation failed" (was due to unpatched kernel schema + guard/env ordering) and delivers actual model responses on the user's attached 100.jpg.
-
-See /tmp/test_100.py and verified_infer.py (updated patterns) for the exact commands used on server.

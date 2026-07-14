@@ -719,10 +719,11 @@ def create_app(
             raise HTTPException(413, "image too large")
         tmp_path.write_bytes(data)
 
-        # obtain runtime
+        # obtain runtime. Use single-GPU placement: 2B/8B FP8 fit on one 4090,
+        # and transformers' MRoPE get_rope_index breaks under multi-GPU (balanced).
         try:
             with manager.operation():
-                rt = manager.load(model_size, "balanced", yarn_1m=True)
+                rt = manager.load(model_size, "single", yarn_1m=True)
         except DemoBusyError:
             raise HTTPException(503, "model is busy")
         except Exception as exc:
@@ -839,7 +840,7 @@ def create_app(
 
         try:
             with manager.operation():
-                rt = manager.load(model_size, "balanced", yarn_1m=True)
+                rt = manager.load(model_size, "single", yarn_1m=True)
         except DemoBusyError:
             raise HTTPException(503, "model busy")
         except Exception as exc:
@@ -897,7 +898,7 @@ def create_app(
     async def chat(
         session_id: str = Form(...),
         model_id: str = Form(...),
-        placement: str = Form("balanced"),
+        placement: str = Form("single"),
         task: str = Form("describe"),
         custom_prompt: str | None = Form(None),
         max_new_tokens: int | None = Form(None),
@@ -1181,7 +1182,7 @@ def build_app_from_env() -> FastAPI:
     default_state = "/state" if Path("/state").exists() else "/tmp/qwen3-vl-demo-state"
     state_dir = Path(os.environ.get("DEMO_STATE_DIR", default_state))
     manager = DemoModelManager(
-        os.environ.get("CKPTDIR", "/mnt/nvme/huggingface"),
+        os.environ.get("CKPTDIR", os.environ.get("HF_HOME", "~/.cache/huggingface")),
         os.environ.get("QWEN3_FP8_KERNEL_DIR"),
         idle_seconds=int(os.environ.get("DEMO_IDLE_SECONDS", "600")),
     )
@@ -1190,6 +1191,34 @@ def build_app_from_env() -> FastAPI:
 
 
 app = build_app_from_env()
+
+
+def run_main(argv: Sequence[str] | None = None) -> int:
+    """CLI entry point for `qwen3-vl web [--host H] [--port P] [--model 2b|8b]`.
+
+    Bridges the top-level CLI to the env-var-driven demo server: CLI flags take
+    precedence but fall back to DEMO_HOST/PORT/CKPTDIR env vars when absent.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="qwen3-vl web",
+        description="Start the local Qwen3-VL Web UI (single-GPU FP8 by default).",
+    )
+    parser.add_argument("--host", default=os.environ.get("DEMO_HOST", "0.0.0.0"))
+    parser.add_argument(
+        "--port", type=int, default=int(os.environ.get("PORT", "7860"))
+    )
+    parser.add_argument(
+        "--model",
+        default=os.environ.get("DEMO_MODEL", "2b"),
+        help="checkpoint preflight size hint (2b/4b/8b); actual model is loaded on demand",
+    )
+    args = parser.parse_args(argv)
+    os.environ.setdefault("DEMO_HOST", args.host)
+    os.environ.setdefault("PORT", str(args.port))
+    main()
+    return 0
 
 
 def main() -> None:

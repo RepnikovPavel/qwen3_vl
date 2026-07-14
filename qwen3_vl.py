@@ -74,9 +74,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         return infer_main(None, rest)
     if command == "web":
-        from web_ui import main as web_main
+        from demo.server import run_main
 
-        return web_main(rest)
+        return run_main(rest)
     if command == "benchmark":
         from benchmark import main as benchmark_main
 

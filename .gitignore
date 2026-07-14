@@ -5,3 +5,16 @@ __pycache__/
 .venv/
 output/
 .ruff_cache/
+
+# Internal data / results — never commit captures from internal logs.
+data/
+frames/
+results/
+bench/
+context_results/
+*.db3
+*.mcap
+*.bag
+*.rosbag
+*.pcd
+*.npy
