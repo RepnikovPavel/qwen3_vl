@@ -1,5 +1,9 @@
 # Qwen3-VL Thinking FP8
 
+Local FP8 inference, skill catalog, benchmarks and context sweeps for the
+Qwen3-VL Thinking models. Reproduces the official Qwen3-VL cookbook capabilities
+as local single-GPU recipes.
+
 ## Модели
 
 | Ключ | Checkpoint | Закреплённый revision |
@@ -52,6 +56,27 @@ export STATE="$WORK/qwen3_vl_demo_state"
 ```
 
 С ноутбука: `ssh -N -L 8001:127.0.0.1:8001 USER@SERVER` → `http://127.0.0.1:8001`. Для быстрой разработки и тестирования используйте **2B FP8** (`--model 2b`). 8B только для финальных бенчмарков и проверок точности.
+
+## Skills (cookbook capabilities)
+
+17 reproducible skills derived from the official Qwen3-VL cookbooks, runnable
+locally through the CLI. See [`docs/skills.md`](docs/skills.md) for the full
+skill → cookbook mapping and coordinate conventions.
+
+```bash
+qwen3-vl skills                                       # list all skills
+qwen3-vl skill --skill 2d_grounding --model 2b --image scene.jpg
+qwen3-vl skill --skill ocr_spotting --model 2b --image receipt.png
+qwen3-vl skill --skill video_understanding --model 2b --image-dir frames/ --num-frames 8
+```
+
+Single-image skills (`describe`, `ocr`, `ocr_spotting`, `2d_grounding`,
+`3d_grounding`, `formula`, `chart`, `spatial_understanding`, ...), multi-image
+sequences (`video_understanding`, `long_document`), and agent/code skills
+(`computer_use`, `mobile_agent`, `mmcode`). Each skill carries the cookbook
+prompt, output kind, input modality, and the correct coordinate scale
+(0–1000 grounding vs 0–999 OCR/mobile). Grounding skills also render an
+annotated image.
 
 ## GPU FP8 inference
 
