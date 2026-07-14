@@ -82,3 +82,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+# Fixes for user issues: mem cleanup, kernel optional to avoid ImportError, state dir, debug for attached image, real t/s and prompt outputs on server.
+# Run with: python verified_infer.py (on server with envs)
+
