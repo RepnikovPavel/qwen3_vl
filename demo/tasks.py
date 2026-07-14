@@ -102,7 +102,7 @@ class DemoPreset:
 GROUNDING_PRESET = DemoPreset(
     key="grounding_2d",
     label="2D Grounding (bbox / points)",
-    prompt='Locate every instance that belongs to the following categories: "car, taxi, person, building, sign, road marking". Report bbox coordinates in JSON format like [{"bbox_2d": [x1, y1, x2, y2], "label": "car"}]. Be complete.',
+    prompt=None,
     output_kind="text",  # we post-process on client/server
     default_max_new_tokens=256,
     default_max_image_side=640,

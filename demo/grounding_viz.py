@@ -42,25 +42,32 @@ COLORS = [
 
 
 def _clean_json_text(text: str) -> str:
-    """Strip markdown code fences and surrounding text."""
+    """Strip markdown code fences and surrounding text. Matches logic from cookbooks/2d_grounding.ipynb parse_json."""
+    if not text:
+        return ""
     text = text.strip()
-    # ```json ... ``` or ``` ... ```
+    # Notebook style: split on ```json line, take until next ```
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() == "```json" or line.strip() == "```":
+            text = "\n".join(lines[i+1:])
+            if "```" in text:
+                text = text.split("```", 1)[0]
+            break
+    # Fallback fence strip
     if "```" in text:
-        # take the first fenced block
         parts = re.split(r"```(?:json)?", text, flags=re.IGNORECASE)
         if len(parts) >= 2:
-            text = parts[1]
-        if "```" in text:
-            text = text.split("```", 1)[0]
-    # sometimes the model adds extra prose; try to find the JSON array/object
-    # look for first [ or { ... last ] or }
+            text = parts[1].split("```", 1)[0]
+    # Extract the JSON array/object if there is prose around it (common in responses)
+    # Prefer the largest plausible [...] or {...} block
     start = min((text.find("["), text.find("{")))
     if start != -1:
         end = max(text.rfind("]"), text.rfind("}"))
         if end > start:
             candidate = text[start : end + 1]
-            # basic sanity
-            if candidate.count("[") <= candidate.count("]") + 1 and candidate.count("{") <= candidate.count("}") + 1:
+            # sanity: balanced enough
+            if candidate.count("[") <= candidate.count("]") + 2 and candidate.count("{") <= candidate.count("}") + 2:
                 text = candidate
     return text.strip()
 

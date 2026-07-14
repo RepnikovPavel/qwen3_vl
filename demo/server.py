@@ -687,7 +687,7 @@ def create_app(
     @app.post("/api/grounding", response_model=GroundingResponse)
     async def grounding(
         image: UploadFile = File(...),
-        prompt: str = Form("Locate the main objects. Report bbox coordinates in JSON format."),
+        prompt: str = Form('Locate every instance that belongs to the following categories: "car, person, vehicle". Report bbox coordinates in JSON format.'),
         max_new_tokens: int = Form(256),
         max_image_side: int = Form(640),
         model_size: str = Form("2b"),
@@ -787,7 +787,7 @@ def create_app(
     @app.post("/api/grounding_3d", response_model=Grounding3DResponse)
     async def grounding_3d(
         image: UploadFile = File(...),
-        prompt: str = Form("Find all cars in this image. For each car, provide its 3D bounding box [x, y, z, x_size, y_size, z_size, pitch, yaw, roll] and label in JSON format."),
+        prompt: str = Form('Find all cars in this image. For each car, provide its 3D bounding box. The output format required is JSON.'),
         max_new_tokens: int = Form(256),
         max_image_side: int = Form(640),
         model_size: str = Form("2b"),
@@ -893,9 +893,19 @@ def create_app(
                     max_new_tokens=max_new_tokens,
                     max_image_side=max_image_side,
                 )
-                # Allow free-form prompt to override the preset for any task.
-                # This enables custom prompts for detection, lane, graph, matching etc.
-                effective_prompt = (custom_prompt or "").strip() or resolved["prompt"]
+                # Chat prompt ALWAYS comes from the textarea (custom_prompt). Skill templates
+                # are never injected at launch time. Task only selects mode (max tokens, output kind, viz).
+                # For grounding we append strict JSON instruction so final answer is parseable for drawing.
+                user_prompt = (custom_prompt or "").strip()
+                effective_prompt = user_prompt or resolved["prompt"]
+                if resolved.get("task") == "grounding_2d" and effective_prompt:
+                    # Use phrasing from the official cookbooks/2d_grounding.ipynb so the model emits
+                    # the trained format: a JSON array of {"bbox_2d": [x1,y1,x2,y2], "label": "..."} (0-1000 normalized)
+                    if "Report bbox coordinates in JSON format" not in effective_prompt:
+                        effective_prompt = effective_prompt.rstrip() + '. Report bbox coordinates in JSON format.'
+                if resolved.get("task") == "grounding_3d" and effective_prompt:
+                    if "provide its 3D bounding box" not in effective_prompt.lower() and "bbox_3d" not in effective_prompt.lower():
+                        effective_prompt = effective_prompt.rstrip() + ' Provide 3D bounding boxes in JSON format.'
                 model_key = normalize_model_size(model_id)
                 if placement not in PLACEMENTS:
                     raise ValueError(f"unsupported placement: {placement}")
@@ -939,7 +949,7 @@ def create_app(
                 )
                 generation = Generation(
                     session_id,
-                    resolved["prompt"],
+                    effective_prompt,
                     model_key,
                     placement,
                     resolved["task"],
