@@ -144,9 +144,13 @@
         <textarea id="prompt" placeholder="Describe the scene completely and precisely."></textarea>
       </div>
 
+      <div class="field">
+        <label>Max tokens <span style="text-transform:none;color:var(--muted)">(thinking + answer; 2B≈32K, 8B≈16K on one 4090)</span></label>
+        <input type="number" id="maxTokens" value="32768" min="1" step="1024">
+      </div>
       <div class="field row">
-        <div><label>Max tokens</label><input type="number" id="maxTokens" value="1024" min="1"></div>
-        <div><label>Image side (0=full)</label><input type="number" id="imageSide" value="0" min="0"></div>
+        <div><label>Temperature</label><input type="number" id="temperature" value="0.6" min="0.1" max="2" step="0.1"></div>
+        <div><label>Top-p</label><input type="number" id="topP" value="0.95" min="0.1" max="1" step="0.05"></div>
       </div>
     </div>
     <div class="left-footer">
@@ -193,7 +197,7 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const state = { files: [], controller: null, sessionId: null, generating: false };
+const state = { files: [], controller: null, sessionId: null, generating: false, overlays: null, liveText: "", liveTimer: null };
 
 (async function init() {
   try {
@@ -341,20 +345,70 @@ $("drawBtn").addEventListener("click", () => {
   }
 });
 
+// ---- live overlay parsing during streaming ----
+// While the model streams its reasoning/answer, we scan the accumulated text
+// for coordinate-like patterns (bbox_2d JSON, [x1,y1,x2,y2], points) and draw
+// them on the fly so the user sees boxes appear in real time. On 'done' these
+// tentative boxes are replaced by the server's clean, parsed overlays.
+function accumulateLive(chunk) {
+  state.liveText += chunk;
+  if (state.liveTimer) return; // throttle: parse at most every 350ms
+  state.liveTimer = setTimeout(() => {
+    state.liveTimer = null;
+    if (!state.generating || !$("drawBtn").classList.contains("active")) return;
+    const live = parseLiveOverlays(state.liveText);
+    if (live && live.length) {
+      // temporarily draw tentative boxes (semi-transparent)
+      drawOverlaysRaw(live, 0.55);
+    }
+  }, 350);
+}
+
+// Parse coordinate mentions from raw streaming text. Returns overlays (0..1)
+// or null. Heuristics:
+//   {"bbox_2d":[x1,y1,x2,y2] ...}  -> box (scale from skill)
+//   [x1, y1, x2, y2] / (x1,y1,x2,y2) where coords look like 0..1000 -> box
+//   [x, y] small pair -> point
+function parseLiveOverlays(text) {
+  const skillKey = $("skill").value;
+  const scale = (skillKey === "ocr_spotting" || skillKey === "mobile_agent") ? 999 : 1000;
+  const out = [];
+  // 1. strict bbox_2d JSON fragments
+  const reBbox = /bbox_2d"\s*:\s*\[\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*\]/g;
+  let m;
+  while ((m = reBbox.exec(text)) !== null) {
+    const [x1,y1,x2,y2] = [m[1],m[2],m[3],m[4]].map(Number);
+    if (validCoord(x1,scale)&&validCoord(y1,scale)&&validCoord(x2,scale)&&validCoord(y2,scale))
+      out.push({kind:"box", pts:[[x1/scale,y1/scale],[x2/scale,y2/scale]], label:""});
+  }
+  // 2. loose 4-number tuples like [0, 517, 42, 567]
+  if (!out.length) {
+    const re4 = /[\(\[]\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*[\)\]]/g;
+    while ((m = re4.exec(text)) !== null) {
+      const [x1,y1,x2,y2] = [m[1],m[2],m[3],m[4]].map(Number);
+      if (validCoord(x1,scale)&&validCoord(y1,scale)&&validCoord(x2,scale)&&validCoord(y2,scale))
+        out.push({kind:"box", pts:[[x1/scale,y1/scale],[x2/scale,y2/scale]], label:""});
+      if (out.length > 80) break;
+    }
+  }
+  return out.length ? out : null;
+}
+function validCoord(v, scale) { return v >= 0 && v <= scale; }
+
 const OVERLAY_COLORS = ["#ff5d5d","#5dff8a","#5dc8ff","#ffd95d","#c25dff","#5dffe1","#ffa55d","#ff5dc4"];
-function drawOverlays(force) {
-  if (!viewer.ctx || !viewer.naturalW) return;
-  viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
-  if (!$("drawBtn").classList.contains("active") && !force) return;
-  const ov = state.overlays;
-  if (!ov || !ov.length) return;
+const EDGES3D = [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
+
+function _paintOverlays(ov, alpha) {
+  if (!viewer.ctx || !viewer.naturalW || !ov || !ov.length) return;
   const W = viewer.naturalW, H = viewer.naturalH;
+  viewer.ctx.save();
+  viewer.ctx.globalAlpha = alpha == null ? 1 : alpha;
   viewer.ctx.lineWidth = Math.max(2, Math.round(W * 0.003));
   viewer.ctx.font = Math.round(W * 0.018) + "px sans-serif";
   viewer.ctx.textBaseline = "top";
   ov.forEach((item, i) => {
     const color = OVERLAY_COLORS[i % OVERLAY_COLORS.length];
-    const pts = item.pts.map(p => [p[0] * W, p[1] * H]);
+    const pts = (item.pts || []).map(p => [p[0] * W, p[1] * H]);
     viewer.ctx.strokeStyle = color; viewer.ctx.fillStyle = color;
     if (item.kind === "box" && pts.length >= 2) {
       const [x1,y1] = pts[0], [x2,y2] = pts[1];
@@ -364,21 +418,28 @@ function drawOverlays(force) {
       viewer.ctx.beginPath(); viewer.ctx.arc(x, y, r, 0, 2*Math.PI); viewer.ctx.fill();
     } else if (item.kind === "poly" && pts.length >= 2) {
       viewer.ctx.beginPath();
-      viewer.ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let k = 1; k < pts.length; k++) viewer.ctx.lineTo(pts[k][0], pts[k][1]);
-      // draw all edges of the 3D wireframe (8 corners): connect each pair once
-      const EDGES3D = [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
-      viewer.ctx.stroke();
-      viewer.ctx.beginPath();
       EDGES3D.forEach(([a,b]) => { if (pts[a] && pts[b]) { viewer.ctx.moveTo(pts[a][0],pts[a][1]); viewer.ctx.lineTo(pts[b][0],pts[b][1]); } });
       viewer.ctx.stroke();
     }
-    // label
     if (item.label) {
       const [lx, ly] = pts[0];
       viewer.ctx.fillText(item.label, lx + 4, ly + 2);
     }
   });
+  viewer.ctx.restore();
+}
+// Draw final overlays (state.overlays). Only when draw button is active.
+function drawOverlays(force) {
+  if (!viewer.ctx || !viewer.naturalW) return;
+  viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
+  if (!$("drawBtn").classList.contains("active") && !force) return;
+  _paintOverlays(state.overlays, 1.0);
+}
+// Draw arbitrary overlays at a given alpha (used for live/tentative boxes).
+function drawOverlaysRaw(ov, alpha) {
+  if (!viewer.ctx || !viewer.naturalW) return;
+  viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
+  _paintOverlays(ov, alpha);
 }
 
 $("send").addEventListener("click", () => state.generating ? stopGen() : startGen());
@@ -394,11 +455,14 @@ async function startGen() {
   $("reasoning").textContent = ""; $("answer").textContent = "";
   $("reasonPill").textContent = ""; $("answerPill").textContent = "";
   $("viz").innerHTML = ""; $("hero").style.display = "none";
-  // reset overlays / draw button for the new generation
+  // reset overlays / live parsing for the new generation
   state.overlays = null;
+  state.liveText = "";
+  if (state.liveTimer) { clearTimeout(state.liveTimer); state.liveTimer = null; }
+  // auto-enable live drawing while streaming (so tentative boxes appear)
   $("drawBtn").disabled = true;
-  $("drawBtn").classList.remove("active");
-  $("drawBtn").textContent = "Draw overlays";
+  $("drawBtn").classList.add("active");
+  $("drawBtn").textContent = "Draw overlays (live)";
   viewer.ctx && viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
   setGen(true); setStatus("live", "loading model…");
 
@@ -410,8 +474,12 @@ async function startGen() {
   form.append("skill", $("skill").value || "");
   form.append("custom_prompt", prompt || "");
   form.append("max_new_tokens", $("maxTokens").value);
-  form.append("max_image_side", $("imageSide").value);
-  form.append("do_sample", "false");
+  // Full input resolution (no resize): the model sees the image as uploaded.
+  form.append("max_image_side", "0");
+  // Qwen-Thinking is trained for sampling; greedy degenerates into loops.
+  form.append("do_sample", "true");
+  form.append("temperature", $("temperature").value);
+  form.append("top_p", $("topP").value);
   if (state.files.length) {
     try { await fetch(`/api/sessions/${state.sessionId}/reset`, { method: "POST" }); } catch(e) {}
     for (const item of state.files) form.append("files", item.file, item.file.name);
@@ -456,8 +524,8 @@ function handle(ev) {
       setStatus("live", `prompt ${ev.prompt_tokens} tok`);
       break;
     case "token":
-      if (ev.phase === "reasoning") append($("reasoning"), ev.text);
-      else if (ev.phase === "answer") append($("answer"), ev.text);
+      if (ev.phase === "reasoning") { append($("reasoning"), ev.text); accumulateLive(ev.text); }
+      else if (ev.phase === "answer") { append($("answer"), ev.text); accumulateLive(ev.text); }
       break;
     case "stats_live":
       $("reasonPill").textContent = ev.generated_tokens ? `${ev.generated_tokens} tok` : "";
@@ -474,17 +542,24 @@ function handle(ev) {
       $("answerPill").textContent = r.tokens_per_second ? `${r.tokens_per_second.toFixed(1)} tok/s` : "";
       setStatus("idle", `${r.finish_reason || "done"} · ${r.generated_tokens || 0} tok`);
       if (ev.structured && ev.structured.value) showStructured(ev.structured);
-      // overlays from coordinate skills → enable the Draw button
+      // stop live parsing and replace tentative boxes with the clean final set
+      if (state.liveTimer) { clearTimeout(state.liveTimer); state.liveTimer = null; }
       const ov = ev.structured && ev.structured.overlays;
       if (Array.isArray(ov) && ov.length) {
         state.overlays = ov;
         $("drawBtn").disabled = false;
-        $("drawBtn").classList.remove("active");
+        $("drawBtn").classList.add("active");
         $("drawBtn").textContent = `Draw overlays (${ov.length})`;
+        // repaint with full opacity over the streamed tentative boxes
+        _paintOverlays(ov, 1.0);
       } else {
         state.overlays = null;
-        $("drawBtn").disabled = true;
+        // keep any live-drawn tentative boxes (if live parse found coords)
+        $("drawBtn").disabled = false;
+        const n = state.overlays ? 0 : 0;
         $("drawBtn").textContent = "Draw overlays";
+        if (!$("drawBtn").classList.contains("active"))
+          viewer.ctx && viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
       }
       break;
     }
