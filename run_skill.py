@@ -124,7 +124,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--kernel-dir")
     parser.add_argument("--gpu-placement", default="single",
                         choices=("single", "auto", "balanced", "balanced_low_0", "sequential"))
-    parser.add_argument("--image", help="local image path (may repeat for multi-image skills)")
+    parser.add_argument(
+        "--image", action="append", default=None,
+        help="local image path; repeat for multi-image sequences (frame order preserved)",
+    )
+    parser.add_argument(
+        "--image-dir", default=None,
+        help="directory of images to load as an ordered sequence (taken in filename order)",
+    )
+    parser.add_argument("--num-frames", type=int, default=8,
+                        help="max frames to load from --image-dir (uniformly sampled)")
     parser.add_argument("--video", help="local video path")
     parser.add_argument("--prompt", help="override the skill prompt (for accepts_custom skills)")
     parser.add_argument("--max-new-tokens", type=int)
@@ -145,8 +154,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     media: list[tuple[str, str]] = []
     if args.video:
         media.append(("video", args.video))
-    if args.image:
-        media.append(("image", args.image))
+    for path in args.image or []:
+        media.append(("image", path))
+    if args.image_dir:
+        directory = Path(args.image_dir).expanduser()
+        if not directory.is_dir():
+            raise SkillError(f"--image-dir is not a directory: {directory}")
+        frames = sorted(
+            p for p in directory.iterdir()
+            if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+        )
+        if not frames:
+            raise SkillError(f"--image-dir contains no images: {directory}")
+        if len(frames) > args.num_frames:
+            step = len(frames) / args.num_frames
+            frames = [frames[min(len(frames) - 1, int(i * step))] for i in range(args.num_frames)]
+        for frame in frames:
+            media.append(("image", str(frame)))
     args.media = media
     payload = run_skill(args)
     if args.json:

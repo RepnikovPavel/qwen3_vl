@@ -73,6 +73,7 @@ WHITELIST_GLOBS = (
     "docs/**/*.png",
     "demo/web/**",
     "scripts/check_no_leaks.py",
+    "scripts/extract_frames.py",
     ".gitignore",
 )
 
