@@ -109,8 +109,19 @@ GROUNDING_PRESET = DemoPreset(
     accepts_custom_prompt=True,
 )
 
+GROUNDING_3D_PRESET = DemoPreset(
+    key="grounding_3d",
+    label="3D Grounding (3D bboxes)",
+    prompt=None,
+    output_kind="text",  # post-process for 3D viz
+    default_max_new_tokens=256,
+    default_max_image_side=640,
+    accepts_custom_prompt=True,
+)
+
 _PRESET_ITEMS = (
     GROUNDING_PRESET,
+    GROUNDING_3D_PRESET,
     DemoPreset(
         key="describe",
         label="Describe",

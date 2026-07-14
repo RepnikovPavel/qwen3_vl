@@ -20,6 +20,7 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict
 
 from demo.generation import DemoGenerationResult, run_streaming_generation
+from demo.grounding_3d_viz import draw_3d_bboxes, generate_camera_params, parse_bbox_3d_from_text, save_annotated_3d
 from demo.grounding_viz import draw_grounding, parse_grounding, save_annotated
 from demo.model_manager import PLACEMENTS, DemoBusyError, DemoModelManager
 from demo.sessions import SessionStore
@@ -767,6 +768,96 @@ def create_app(
             )
         except Exception as exc:
             raise HTTPException(500, f"grounding inference failed: {type(exc).__name__}: {exc}")
+        finally:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    # ------------------------------ 3D Grounding (reproduces 3d_grounding.ipynb) ------------------------------
+
+    class Grounding3DResponse(BaseModel):
+        text: str
+        annotated_media_id: str | None = None
+        parsed: list[dict[str, Any]] = []
+        cam_params: dict[str, float] | None = None
+        width: int | None = None
+        height: int | None = None
+
+    @app.post("/api/grounding_3d", response_model=Grounding3DResponse)
+    async def grounding_3d(
+        image: UploadFile = File(...),
+        prompt: str = Form("Find all cars in this image. For each car, provide its 3D bounding box [x, y, z, x_size, y_size, z_size, pitch, yaw, roll] and label in JSON format."),
+        max_new_tokens: int = Form(256),
+        max_image_side: int = Form(640),
+        model_size: str = Form("8b"),
+        fov: float = Form(60.0),
+    ):
+        """3D Grounding mode.
+
+        Replicates flows from 3d_grounding.ipynb:
+        - prompts for 3D bbox output
+        - camera param generation (default or from image)
+        - server-side projection + drawing of 3D wireframes
+        """
+        if not (image.content_type or "").startswith("image/"):
+            raise HTTPException(400, "3D grounding supports single images")
+
+        media_root = Path(os.environ.get("DEMO_STATE_DIR", "/state")) / "media"
+        media_root.mkdir(parents=True, exist_ok=True)
+
+        suffix = Path(image.filename or "upload.jpg").suffix or ".jpg"
+        tmp_path = media_root / f"ground3d_{uuid.uuid4().hex}{suffix}"
+        data = await image.read()
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "image too large")
+        tmp_path.write_bytes(data)
+
+        try:
+            with manager.operation():
+                rt = manager.load(model_size, "single")
+        except DemoBusyError:
+            raise HTTPException(503, "model busy")
+        except Exception as exc:
+            raise HTTPException(500, f"failed to load model: {exc}")
+
+        try:
+            media = rt.prepare_media([("image", str(tmp_path))], max_image_side)
+
+            from qwen3_vl_offline import build_messages  # type: ignore
+            messages = build_messages(media, prompt, [], None)
+            inputs = rt.processor.apply_chat_template(
+                messages, tokenize=True, add_generation_prompt=True,
+                return_dict=True, return_tensors="pt"
+            )
+            from demo.generation import move_inputs_to_model_devices
+            inputs, _, _ = move_inputs_to_model_devices(rt.model, inputs)
+
+            import torch
+            with torch.inference_mode():
+                out = rt.model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False, return_dict_in_generate=True)
+            cont = out.sequences[:, inputs["input_ids"].shape[1]:]
+            raw = rt.processor.batch_decode(cont, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+            clean_text = raw.strip()
+
+            parsed = parse_bbox_3d_from_text(clean_text)
+            orig = Image.open(tmp_path).convert("RGB")
+            cam = generate_camera_params(orig, fov=fov)
+            annotated = draw_3d_bboxes(orig, cam, parsed)
+            ann_name = f"ground3d_{uuid.uuid4().hex}.png"
+            ann_path = media_root / ann_name
+            annotated.save(ann_path)
+
+            return Grounding3DResponse(
+                text=clean_text,
+                annotated_media_id=ann_name,
+                parsed=parsed,
+                cam_params=cam,
+                width=orig.width,
+                height=orig.height,
+            )
+        except Exception as exc:
+            raise HTTPException(500, f"3d grounding failed: {type(exc).__name__}: {exc}")
         finally:
             try:
                 tmp_path.unlink(missing_ok=True)

@@ -3503,10 +3503,114 @@
       const isGround = task && (task.key === 'grounding_2d' || (task.key || '').includes('ground'));
       const ans = state.active && state.active.answer;
       if ((isGround || (ans && (ans.includes('bbox_2d') || ans.includes('point_2d')))) && ans) {
-        // small delay so images are in DOM
         setTimeout(enhanceVisualWithGrounding, 50);
       }
+      const isGround3d = task && (task.key === 'grounding_3d' || (ans && ans.includes('bbox_3d')));
+      if (isGround3d && ans) {
+        setTimeout(enhanceVisualWithGrounding3D, 80);
+      }
     };
+
+    // --- 3D Grounding client-side support (simple wireframe projection) ---
+    function parseBbox3DClient(text) {
+      if (!text) return [];
+      let t = text.trim().replace(/```json?/gi, '').replace(/```/g, '').trim();
+      const m = t.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
+      if (m) t = m[1];
+      try {
+        let d = JSON.parse(t);
+        if (!Array.isArray(d)) d = [d];
+        return d.filter(x => x && x.bbox_3d);
+      } catch (e) { return []; }
+    }
+
+    function generateCamParams(w, h, fov = 60) {
+      const fx = Math.round(w / (2 * Math.tan((fov * Math.PI / 180) / 2)));
+      const fy = Math.round(h / (2 * Math.tan((fov * Math.PI / 180) / 2)));
+      return { fx, fy, cx: w / 2, cy: h / 2 };
+    }
+
+    function project3DBox(bbox3d, cam) {
+      // bbox3d: [x,y,z, sx,sy,sz, pitch,yaw,roll]
+      const [x, y, z, sx, sy, sz, p, ya, r] = bbox3d;
+      const hx = sx / 2, hy = sy / 2, hz = sz / 2;
+      const corners = [
+        [hx, hy, hz], [hx, hy, -hz], [hx, -hy, hz], [hx, -hy, -hz],
+        [-hx, hy, hz], [-hx, hy, -hz], [-hx, -hy, hz], [-hx, -hy, -hz]
+      ];
+      const toRad = (d) => d * Math.PI / 180;
+      const rp = toRad(p), ry = toRad(ya), rr = toRad(r);
+      const img = [];
+      for (const c of corners) {
+        // rotate
+        let [cx, cy, cz] = c;
+        let x1 = cx;
+        let y1 = cy * Math.cos(rp) - cz * Math.sin(rp);
+        let z1 = cy * Math.sin(rp) + cz * Math.cos(rp);
+        let x2 = x1 * Math.cos(ry) + z1 * Math.sin(ry);
+        let y2 = y1;
+        let z2 = -x1 * Math.sin(ry) + z1 * Math.cos(ry);
+        let x3 = x2 * Math.cos(rr) - y2 * Math.sin(rr);
+        let y3 = x2 * Math.sin(rr) + y2 * Math.cos(rr);
+        let z3 = z2;
+        const X = x3 + x, Y = y3 + y, Z = z3 + z;
+        if (Z > 0) {
+          const ix = cam.fx * (X / Z) + cam.cx;
+          const iy = cam.fy * (Y / Z) + cam.cy;
+          img.push([ix, iy]);
+        }
+      }
+      return img;
+    }
+
+    const EDGES3D = [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
+
+    function enhanceVisualWithGrounding3D() {
+      const target = elements.liveVisual;
+      if (!target) return;
+      const parsed = parseBbox3DClient(state.active.answer);
+      if (!parsed.length) return;
+      const imgs = target.querySelectorAll('img');
+      imgs.forEach(imgEl => {
+        if (imgEl.dataset.grounded3d) return;
+        const newImg = new Image();
+        newImg.onload = () => {
+          const w = newImg.width, h = newImg.height;
+          const cam = generateCamParams(w, h);
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(newImg, 0, 0);
+          const colors = ['#f55','#5f5','#55f','#ff5','#f5f','#5ff'];
+          parsed.forEach((item, i) => {
+            const color = colors[i % colors.length];
+            const pts = project3DBox(item.bbox_3d, cam);
+            if (pts.length < 8) return;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            for (const [a,b] of EDGES3D) {
+              if (pts[a] && pts[b]) {
+                ctx.beginPath();
+                ctx.moveTo(pts[a][0], pts[a][1]);
+                ctx.lineTo(pts[b][0], pts[b][1]);
+                ctx.stroke();
+              }
+            }
+            const label = item.label || '';
+            if (label && pts[0]) {
+              ctx.fillStyle = color;
+              ctx.font = '12px sans-serif';
+              ctx.fillText(label, pts[0][0] + 3, pts[0][1] + 12);
+            }
+          });
+          canvas.style.maxWidth = '100%';
+          canvas.title = '3D Grounding (projected wireframes)';
+          if (imgEl.parentNode) imgEl.parentNode.replaceChild(canvas, imgEl);
+        };
+        newImg.src = imgEl.src;
+        imgEl.dataset.grounded3d = 'true';
+      });
+    }
   </script>
 </body>
 </html>
