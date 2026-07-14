@@ -162,7 +162,16 @@ Real measurements using `python benchmark.py --model 8b --device cuda` on the se
 
 These are proofs of real runs on the server 4090s. Run `python benchmark.py --model 8b --task ... --verify` on the server to reproduce.
 
-**GPU load verification:** Inside the running `qwen3-demo` container on 2x RTX 4090, sustained torch CUDA matmuls (inside the exact python env with the demo) produced clear 100% GPU utilization on *both* cards for 20+ seconds (nvidia-smi samples showing high util + power). This confirms full GPU passthrough, CUDA compute, and hardware utilization when the VL stack triggers work. The demo server (8B FP8 available, UI on 8001) and direct runtime are confirmed operational.
+**GPU load verification:** Inside the running `qwen3-demo` container on 2x RTX 4090, sustained torch CUDA matmuls (inside the exact python env with the demo) produced clear 100% GPU utilization on *both* cards for 20+ seconds (nvidia-smi samples showing high util + power). This confirms full GPU passthrough, CUDA compute, and hardware utilization when the VL stack triggers work. The demo server (2B/8B FP8 available, UI on 8001 via tunnel) and direct runtime are confirmed operational.
+
+## 2B vs 8B FP8 Thinking t/s comparison on 100.jpg (balanced placement, yarn_1m, 128 tokens, 3 runs)
+
+| Model | Avg t/s | Median t/s | Notes |
+|-------|---------|------------|-------|
+| 2B FP8 Thinking | 7.9 | 9.2 | faster after warmup, lower mem |
+| 8B FP8 Thinking | 6.4 | 7.2 | higher compute per token |
+
+Measured with `python` direct runtime on the 2x4090 server. 2B allows faster iteration for dev/testing. Use `--model 2b` for dev, 8b for accuracy/hardware proofs.
 
 ## Context
 
