@@ -741,12 +741,6 @@ class Qwen3VLRuntime:
         # Ensure we can clean up on errors
         self._cleanup = _cleanup_cuda if device == "cuda" else (lambda: None)
 
-    def __del__(self):
-        try:
-            self._cleanup()
-        except Exception:
-            pass
-
         torch.manual_seed(seed)
         if device == "cuda":
             torch.cuda.manual_seed_all(seed)
@@ -793,6 +787,12 @@ class Qwen3VLRuntime:
                 f"model OK: fp8_modules={len(self.fp8_names)}, "
                 f"parameter_dtypes={dict(self.dtype_counts)}, load={self.load_seconds:.3f}s"
             )
+
+    def __del__(self):
+        try:
+            self._cleanup()
+        except Exception:
+            pass
 
     def prepare_media(
         self, media_inputs: Sequence[tuple[str, Any]], max_image_side: int
