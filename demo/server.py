@@ -702,10 +702,12 @@ def create_app(
         if not (image.content_type or "").startswith("image/"):
             raise HTTPException(400, "2D grounding currently supports single images")
 
-        # Align *exactly* to cookbooks/2d_grounding.ipynb phrasing so the model emits
-        # the trained format: JSON array of objects with "bbox_2d" + "label".
+        # Align to cookbooks + force <think> separation so final answer is clean JSON for drawing.
         if "Report bbox coordinates in JSON format" not in prompt:
-            prompt = prompt.rstrip(". ") + ' Report bbox coordinates in JSON format like [{"bbox_2d": [x1, y1, x2, y2], "label": "car"}].'
+            prompt = prompt.rstrip(". ") + (
+                ' First write step-by-step reasoning inside <think> </think> tags. '
+                'After </think> output ONLY JSON like [{"bbox_2d": [x1, y1, x2, y2], "label": "car"}].'
+            )
 
         media_root = Path(os.environ.get("DEMO_STATE_DIR", "/state")) / "media"
         media_root.mkdir(parents=True, exist_ok=True)
@@ -920,11 +922,14 @@ def create_app(
                 user_prompt = (custom_prompt or "").strip()
                 effective_prompt = user_prompt or resolved["prompt"]
                 if resolved.get("task") == "grounding_2d" and effective_prompt:
-                    # Use phrasing from the official cookbooks/2d_grounding.ipynb so the model emits
-                    # the trained format (JSON array with bbox_2d + label). The chat textarea provides
-                    # the locate instruction; we append only the format part.
+                    # Use phrasing from the official cookbooks to force trained JSON output.
+                    # Explicitly ask for <think> tags so thinking and final JSON are separated.
                     if "Report bbox coordinates in JSON format" not in effective_prompt:
-                        effective_prompt = effective_prompt.rstrip() + ' Report bbox coordinates in JSON format like [{"bbox_2d": [x1, y1, x2, y2], "label": "car"}].'
+                        effective_prompt = effective_prompt.rstrip() + (
+                            ' First write your step-by-step reasoning inside <think> and </think> tags. '
+                            'After the </think> output ONLY a JSON array like [{"bbox_2d": [x1, y1, x2, y2], "label": "car"}]. '
+                            'No text after the closing think tag.'
+                        )
                 if resolved.get("task") == "grounding_3d" and effective_prompt:
                     if "provide its 3D bounding box" not in effective_prompt.lower() and "bbox_3d" not in effective_prompt.lower():
                         effective_prompt = effective_prompt.rstrip() + ' Provide 3D bounding boxes in JSON format.'
@@ -1033,11 +1038,28 @@ def create_app(
                         generation.emit,
                         video_num_frames=video_num_frames,
                     )
+
+                    # Ensure clean separation: if the final result.answer contains the think marker (or the streamed
+                    # accumulation had it), carve out only the post-</think> part for "Final answer".
+                    # This prevents the entire thinking from leaking into the final answer pane.
+                    final_reasoning = result.reasoning
+                    final_answer = result.answer
+                    combined = (final_answer or "") + " " + (final_reasoning or "")
+                    if "</think>" in combined:
+                        # prefer the last </think>
+                        marker_pos = combined.rfind("</think>")
+                        before = combined[:marker_pos]
+                        after = combined[marker_pos + 8 :]
+                        if not final_reasoning:
+                            final_reasoning = before.rsplit("<think>", 1)[-1].strip() or final_reasoning
+                        if after.strip():
+                            final_answer = after.strip()
+
                     structured = build_structured_result(
-                        resolved["task"], result.answer
+                        resolved["task"], final_answer
                     )
-                    assistant_content = result.answer
-                    if not assistant_content and not result.reasoning:
+                    assistant_content = final_answer
+                    if not assistant_content and not final_reasoning:
                         assistant_content = (
                             "[stopped]" if result.stopped else "[empty response]"
                         )
@@ -1046,14 +1068,21 @@ def create_app(
                         session_id,
                         user_prompt or effective_prompt,
                         assistant_content,
-                        reasoning=result.reasoning,
+                        reasoning=final_reasoning,
                         metrics={
                             "task": resolved["task"],
                             "generation": result.to_dict(),
                             "structured": structured,
                         },
                     )
-                    completed = (result, structured)
+                    # Use cleaned for the event result shown to client
+                    cleaned_result = result
+                    try:
+                        from dataclasses import replace
+                        cleaned_result = replace(result, reasoning=final_reasoning, answer=final_answer)
+                    except Exception:
+                        pass
+                    completed = (cleaned_result, structured)
                 except Exception as exc:
                     LOGGER.exception("generation failed")
                     failure = f"{type(exc).__name__}: generation failed"

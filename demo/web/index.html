@@ -2267,6 +2267,52 @@
         });
       }
 
+      // History enhancement: draw grounding on images that appear in the saved conversation messages.
+      function enhanceConversationGroundingVisuals() {
+        document.querySelectorAll('.message.assistant').forEach(wrapper => {
+          const text = wrapper.dataset.answerText || '';
+          if (!text) return;
+          const p2d = parseGroundingClient(text);
+          const p3d = parseBbox3DClient(text);
+          if (!p2d.length && !p3d.length) return;
+
+          wrapper.querySelectorAll('.message-media img, .visual-pane img, .pane-content img').forEach(imgEl => {
+            if (imgEl.dataset.convGrounded) return;
+            imgEl.dataset.convGrounded = 'true';
+            const newI = new Image();
+            newI.onload = () => {
+              let cnv;
+              if (p2d.length) {
+                cnv = drawGroundingOnCanvas(newI, p2d);
+              } else if (p3d.length) {
+                const w = newI.width, h = newI.height;
+                const cam = generateCamParams(w, h);
+                cnv = document.createElement('canvas');
+                cnv.width = w; cnv.height = h;
+                const cx = cnv.getContext('2d');
+                cx.drawImage(newI, 0, 0);
+                const cols = ['#f55','#5f5','#55f'];
+                p3d.forEach((it, ii) => {
+                  const col = cols[ii % cols.length];
+                  const pts = project3DBox(it, cam);
+                  if (pts.length < 8) return;
+                  cx.strokeStyle = col; cx.lineWidth = 2;
+                  for (const [aa,bb] of EDGES3D) {
+                    if (pts[aa] && pts[bb]) { cx.beginPath(); cx.moveTo(pts[aa][0], pts[aa][1]); cx.lineTo(pts[bb][0], pts[bb][1]); cx.stroke(); }
+                  }
+                });
+              }
+              if (cnv) {
+                cnv.style.maxWidth = '100%';
+                cnv.style.border = '1px solid #303748';
+                if (imgEl.parentNode) imgEl.parentNode.replaceChild(cnv, imgEl);
+              }
+            };
+            newI.src = imgEl.src;
+          });
+        });
+      }
+
       function readableTime(value) {
         if (!value) return "";
         const numeric = Number(value);
@@ -2586,6 +2632,9 @@
         elements.hero.hidden = messages.length > 0 || !elements.generationCard.hidden;
         messages.forEach((message, index) => elements.conversation.append(renderMessage(message, session || {}, index)));
         updateTaskUI(false);
+        // Apply client-side grounding drawing (boxes/points) also to the final history images.
+        // This makes the drawn output visible in the conversation after the live card is hidden.
+        setTimeout(enhanceConversationGroundingVisuals, 80);
       }
 
       function renderMessage(message, session, index) {
@@ -2608,6 +2657,9 @@
             responsePane("Final answer", content || "No answer returned", false)
           );
           wrapper.append(grid);
+          // Attach the final answer text so we can draw grounding boxes on the history visuals too.
+          if (content) wrapper.dataset.answerText = content;
+          if (task && (task.key === 'grounding_2d' || task.key === 'grounding_3d')) wrapper.dataset.isGrounding = 'true';
         } else {
           wrapper.append(node("div", "message-body", content));
           const media = mediaForMessage(session, message, index);
