@@ -15,8 +15,10 @@ Commands:
   download       download and fully verify one or more checkpoints
   verify         verify existing local checkpoints without downloading
   infer          run local single/multi-image or video inference
+  skills         list the available Qwen3-VL skills (cookbook capabilities)
+  skill          run one skill on media (grounding, OCR, video, document, ...)
   web            start the local Web UI
-  benchmark      benchmark one model in one process
+  benchmark      benchmark one model/skill in one process
   eval-run       run all synthetic VL evaluation fixtures
   parity-run     compare direct Transformers generation with the runtime
   sweep-context  find the practical context limit with isolated processes
@@ -54,6 +56,24 @@ def _models(argv: Sequence[str]) -> int:
     return 0
 
 
+def _skills(argv: Sequence[str]) -> int:
+    if argv and argv != ["--json"]:
+        raise SystemExit("skills accepts only --json")
+    from skills import public_skills
+
+    payload = public_skills()
+    if argv == ["--json"]:
+        print(json.dumps(payload, indent=2))
+    else:
+        print("SKILL                OUTPUT_KIND   FRAMES         COOKBOOK")
+        for item in payload["skills"]:
+            print(
+                f"{item['key']:<20} {item['output_kind']:<13} "
+                f"{item['frames_kind']:<14} {item['cookbook']}"
+            )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if not arguments or arguments[0] in {"-h", "--help", "help"}:
@@ -63,6 +83,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     command, rest = arguments[0], arguments[1:]
     if command == "models":
         return _models(rest)
+    if command == "skills":
+        return _skills(rest)
     if command in {"download", "verify"}:
         from download_models import main as download_main
 
@@ -73,6 +95,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from qwen3_vl_offline import main as infer_main
 
         return infer_main(None, rest)
+    if command == "skill":
+        from run_skill import main as skill_main
+
+        return skill_main(rest)
     if command == "web":
         from demo.server import run_main
 

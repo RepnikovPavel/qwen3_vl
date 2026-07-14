@@ -98,14 +98,11 @@ from download_models import verify_checkpoint
 from parity import fingerprint_tensors, token_ids_sha256
 
 
-DEFAULT_CKPT_DIR = Path("/mnt/nvme/huggingface")
+DEFAULT_CKPT_DIR = Path(os.environ.get("CKPTDIR", os.environ.get("HF_HOME", "~/.cache/huggingface"))).expanduser()
 NATIVE_CONTEXT_TOKENS = 262_144
 YARN_CONTEXT_TOKENS = 1_000_000
 GPU_PLACEMENTS = ("single", "auto", "balanced", "balanced_low_0", "sequential")
-DEFAULT_IMAGE = Path(
-    "/mnt/nvme/rowdata/nu/samples/CAM_BACK_RIGHT/"
-    "n008-2018-08-30-15-16-55-0400__CAM_BACK_RIGHT__1535657109278113.jpg"
-)
+DEFAULT_IMAGE = Path(os.environ.get("QWEN3_DEFAULT_IMAGE", ""))
 REQUIRED_FILES = {
     "config.json",
     "generation_config.json",
@@ -219,8 +216,12 @@ def validate_generation_settings(
     top_k: int,
     cpu_threads: int,
 ) -> None:
-    if max_new_tokens < 1 or max_image_side < 1:
-        raise ValueError("max_new_tokens and max_image_side must be positive")
+    if max_new_tokens < 1:
+        raise ValueError("max_new_tokens must be positive")
+    # max_image_side == 0 means "no resize" (use the input resolution as-is),
+    # matching the cookbook behavior for grounding/spatial skills.
+    if max_image_side < 0:
+        raise ValueError("max_image_side must be 0 (no resize) or positive")
     if not math.isfinite(temperature) or temperature <= 0:
         raise ValueError("temperature must be a finite positive number")
     if not math.isfinite(top_p) or not 0 < top_p <= 1:
@@ -1016,6 +1017,11 @@ def main(device: str | None = None, argv: Sequence[str] | None = None) -> int:
         )
         media_inputs = list(args.media or [])
         if not media_inputs and not args.text_only:
+            if not str(DEFAULT_IMAGE):
+                raise ValueError(
+                    "no media provided; pass --image/--video, or set QWEN3_DEFAULT_IMAGE, "
+                    "or use --text-only"
+                )
             media_inputs = [("image", str(DEFAULT_IMAGE))]
         result, media = runtime.infer(
             media_inputs=media_inputs,
