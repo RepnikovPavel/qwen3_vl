@@ -27,13 +27,14 @@ from model_catalog import get_model_spec
 
 RESULT_PREFIX = "CONTEXT_RESULT_JSON="
 FILLER_UNIT = " context"
+DEFAULT_BASE_PROMPT = "Measure multimodal long-context inference."
 
 
-def _prepare_for_target(runtime: Qwen3VLRuntime, image: str, target: int, max_side: int):
+def _prepare_for_target(runtime: Qwen3VLRuntime, image: str, target: int, max_side: int, base_prompt: str = DEFAULT_BASE_PROMPT):
     media = runtime.prepare_media([("image", image)], max_side)
 
     def render(repetitions: int):
-        prompt = "Measure multimodal long-context inference." + FILLER_UNIT * repetitions
+        prompt = base_prompt + FILLER_UNIT * repetitions
         messages = build_messages(media, prompt)
         inputs = runtime.processor.apply_chat_template(
             messages,
@@ -79,7 +80,8 @@ def child_attempt(args) -> dict[str, object]:
             gpu_placement=args.gpu_placement,
         )
         inputs, prompt_tokens = _prepare_for_target(
-            runtime, args.image, args.child_target, args.max_image_side
+            runtime, args.image, args.child_target, args.max_image_side,
+            base_prompt=getattr(args, "child_base_prompt", DEFAULT_BASE_PROMPT),
         )
         context_limit = int(runtime.model.config.get_text_config().max_position_embeddings)
         if prompt_tokens + args.reserve > context_limit:
@@ -206,6 +208,9 @@ def _child_command(args, target: int) -> list[str]:
         command.extend(["--kernel-dir", args.kernel_dir])
     if args.yarn_1m:
         command.append("--yarn-1m")
+    child_prompt = getattr(args, "child_base_prompt", DEFAULT_BASE_PROMPT)
+    if child_prompt != DEFAULT_BASE_PROMPT:
+        command.extend(["--child-base-prompt", child_prompt])
     return command
 
 
@@ -317,6 +322,7 @@ def search(args) -> dict[str, object]:
             "repo_id": spec.repo_id,
             "revision": spec.revision,
         },
+        "skill": args.skill,
         "device_mode": "gpu_fp8" if args.device == "cuda" else "cpu_fp32",
         "gpu_placement": args.gpu_placement,
         "context_mode": "yarn_1m" if args.yarn_1m else "native_256k",
@@ -368,6 +374,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="test Qwen's official factor-3 Interleaved-MRoPE 1M overlay",
     )
+    parser.add_argument(
+        "--skill",
+        default=None,
+        help="fix the media config (image side, prompt) to a cookbook skill; "
+             "the sweep then finds the max text context on top of that skill's visual tokens",
+    )
+    parser.add_argument("--child-base-prompt", default=DEFAULT_BASE_PROMPT, help=argparse.SUPPRESS)
     parser.add_argument("--child-target", type=int, help=argparse.SUPPRESS)
     return parser
 
@@ -376,6 +389,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.max_tokens is None:
         args.max_tokens = 1_000_000 if args.yarn_1m else 262_144
+    # Resolve skill: fix the media config + base prompt for the whole sweep.
+    if args.skill:
+        from skills import get_skill
+
+        skill = get_skill(args.skill)
+        # Sweep needs a concrete resolution; a skill default of 0 ("no resize")
+        # is mapped to a representative side so the skill's visual-token budget
+        # is actually exercised.
+        side = skill.default_max_image_side or 640
+        if args.max_image_side == 224:  # argparse default -> adopt skill default
+            args.max_image_side = side
+        if args.child_base_prompt == DEFAULT_BASE_PROMPT:
+            args.child_base_prompt = (
+                f"[skill={args.skill}] " + skill.prompt
+            )[:200]
     if (
         args.reserve < 1
         or args.start < 1

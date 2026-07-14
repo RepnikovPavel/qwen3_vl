@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
-"""Reproducible single-image latency benchmark for one Qwen3-VL model.
-Server proofs (2x RTX 4090) captured via nvidia-smi during container runs (100% util verified)."""
+"""Reproducible latency/throughput benchmark for one Qwen3-VL model and skill.
+
+Runs warmup + N measured passes on a single media input (image, multi-image
+sequence, or video) and reports median/p95 latency, tokens/s, peak VRAM, and
+finish_reason. When ``--skill`` is given, the prompt + media shape come from
+the skill catalog (skills.py) and the output is verified to match the skill's
+expected structure (JSON bboxes, LaTeX formulas, structured chart, ...).
+"""
 
 from __future__ import annotations
 
@@ -13,7 +19,7 @@ import statistics
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import torch
 
@@ -23,10 +29,12 @@ from qwen3_vl_offline import (
     Qwen3VLRuntime,
     validate_generation_settings,
 )
+from skills import SKILLS, SkillError, resolve_skill
+from skill_parsers import parse_skill
 
 
-SCHEMA_VERSION = 1
-DEFAULT_PROMPT = "Describe this driving scene completely and precisely."
+SCHEMA_VERSION = 2
+DEFAULT_PROMPT = "Describe the visual content completely and precisely."
 
 # Performance benchmark task presets for typical VL perception tasks
 TASK_PROMPTS = {
@@ -232,13 +240,54 @@ def _run_task_verification(runtime: "Qwen3VLRuntime", image_path: Path, prompt: 
     return results
 
 
+def verify_skill_output(skill_key: str, answer: str) -> dict[str, object]:
+    """Check that a skill's answer has the expected structure.
+
+    Returns {verified: bool, parsed: <any>, criterion: str}.
+    """
+    skill = SKILLS[skill_key]
+    parsed: Any = None
+    criterion = ""
+    try:
+        parsed = parse_skill(skill_key, answer)
+    except Exception as exc:  # noqa: BLE001 - verification must not crash the bench
+        return {"verified": False, "parsed": None, "criterion": f"parse error: {exc}"}
+    if skill.output_kind in {"grounding_2d", "grounding_3d"}:
+        verified = isinstance(parsed, list) and len(parsed) >= 1
+        criterion = "at least one bbox/point parsed"
+    elif skill.output_kind == "formula":
+        formulas = parsed.get("formulas", []) if isinstance(parsed, dict) else []
+        verified = len(formulas) >= 1
+        criterion = "at least one LaTeX formula"
+    elif skill.output_kind == "chart":
+        verified = isinstance(parsed, dict) and bool(parsed)
+        criterion = "non-empty chart object"
+    elif skill.output_kind == "code":
+        verified = len(answer.strip()) >= 20
+        criterion = "non-trivial code output (>=20 chars)"
+    else:  # text
+        verified = len(answer.strip()) >= 10
+        criterion = "non-trivial text (>=10 chars)"
+    return {"verified": bool(verified), "parsed": parsed, "criterion": criterion}
+
+
 def run_benchmark(args) -> dict[str, object]:
+    skill_key = getattr(args, "skill", None)
+    if skill_key:
+        resolved = resolve_skill(
+            skill_key,
+            custom_prompt=args.prompt,
+            max_new_tokens=args.max_new_tokens,
+            max_image_side=args.max_image_side,
+        )
+        prompt = resolved["prompt"]
+        task = f"skill:{skill_key}"
+    else:
+        prompt = args.prompt or TASK_PROMPTS.get(args.task, DEFAULT_PROMPT)
+        task = args.task
     image_path = Path(args.image).expanduser().resolve()
     if not image_path.is_file():
         raise FileNotFoundError(f"benchmark image does not exist: {image_path}")
-
-    # Determine prompt from task or override
-    prompt = args.prompt or TASK_PROMPTS.get(args.task, DEFAULT_PROMPT)
 
     runtime = Qwen3VLRuntime(
         model_size=args.model,
@@ -335,6 +384,31 @@ def run_benchmark(args) -> dict[str, object]:
     verification = None
     if getattr(args, "verify", False):
         verification = _run_task_verification(runtime, image_path, prompt, args)
+    # Skill verification: check the last measured run's answer matches the
+    # skill's expected output structure (JSON bboxes, LaTeX, ...).
+    skill_verification = None
+    if skill_key and runs:
+        last_answer = ""  # answer text is not stored per-run to keep JSON small; re-derive via sha not possible
+        # Re-run a single short inference purely for verification of structure.
+        try:
+            verify_result, _ = runtime.infer(
+                media_inputs=media_inputs,
+                prompt=prompt,
+                max_new_tokens=min(resolved["max_new_tokens"] if skill_key else args.max_new_tokens, 512),
+                max_image_side=args.max_image_side,
+                do_sample=not args.greedy,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                top_k=args.top_k,
+                video_num_frames=video_num_frames,
+                check_finite_logits=False,
+            )
+            skill_verification = verify_skill_output(skill_key, verify_result.answer)
+            skill_verification["verification_tokens_per_second"] = round(
+                verify_result.tokens_per_second, 3
+            )
+        except Exception as exc:  # noqa: BLE001
+            skill_verification = {"verified": False, "criterion": f"verification inference failed: {exc}"}
     environment = {
         "python_packages": {
             name: _package_version(name)
@@ -396,6 +470,7 @@ def run_benchmark(args) -> dict[str, object]:
         "warmup_runs": args.warmup,
         "runs": runs,
         "verification": verification,
+        "skill_verification": skill_verification,
         "summary": {
             "runs": len(runs),
             "task": args.task,
@@ -431,6 +506,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=list(TASK_PROMPTS.keys()),
         help="task preset for specialized benchmarks (lane, 2d det, 3d, graph, matching)",
     )
+    parser.add_argument(
+        "--skill",
+        default=None,
+        choices=sorted(SKILLS),
+        help="use a cookbook skill (skills.py) for prompt + media shape; overrides --task/--prompt",
+    )
     parser.add_argument("--num-frames", type=int, default=5, help="frames for video/sequence tasks (uses repeated image for matching/graph)")
     parser.add_argument("--max-image-side", type=int, default=640)
     parser.add_argument("--max-new-tokens", type=int, default=2048)
@@ -452,7 +533,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.runs < 1 or args.warmup < 0:
         raise ValueError("--runs must be positive and --warmup non-negative")
-    if getattr(args, "prompt", None) is None:
+    if args.skill:
+        resolved = resolve_skill(
+            args.skill,
+            custom_prompt=args.prompt,
+            max_new_tokens=args.max_new_tokens,
+            max_image_side=args.max_image_side,
+        )
+        # Let the skill drive prompt/token/side defaults unless the user overrode
+        # them explicitly on the CLI (argparse has no "was set?" API, so we rely
+        # on the skill filling in only when the CLI value equals the argparse default).
+        if args.prompt is None:
+            args.prompt = resolved["prompt"]
+        if args.max_image_side == 640:  # argparse default -> adopt skill default
+            args.max_image_side = resolved["max_image_side"]
+        if args.max_new_tokens == 2048:  # argparse default -> adopt skill default
+            args.max_new_tokens = resolved["max_new_tokens"]
+    elif getattr(args, "prompt", None) is None:
         args.prompt = TASK_PROMPTS.get(args.task, DEFAULT_PROMPT)
     validate_generation_settings(
         max_new_tokens=args.max_new_tokens,
