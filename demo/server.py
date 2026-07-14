@@ -839,6 +839,16 @@ def create_app(
                     except Exception as exc:
                         LOGGER.exception("model cleanup failed")
                         failure = f"{type(exc).__name__}: model cleanup failed"
+                    # Extra: ensure CUDA memory is released even after errors
+                    try:
+                        import gc
+                        import torch
+                        gc.collect()
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                            torch.cuda.synchronize()
+                    except Exception:
+                        pass
                 if failure is not None:
                     generation.fail(failure)
                 elif completed is not None:
@@ -868,6 +878,15 @@ def create_app(
             if uploaded_this_request and not handed_to_worker:
                 cleanup_paths = store.reset_conversation(session_id)
                 _remove_paths(cleanup_paths, media_root)
+            # Extra safety for GPU memory after any error path
+            try:
+                import gc
+                import torch
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
 
     @app.post("/api/stop/{session_id}")
     def stop(session_id: str):
@@ -898,7 +917,9 @@ def create_app(
 
 
 def build_app_from_env() -> FastAPI:
-    state_dir = Path(os.environ.get("DEMO_STATE_DIR", "/tmp/qwen3-vl-demo-state"))
+    # Prefer the mounted persistent state dir when running in our standard container setup.
+    default_state = "/state" if Path("/state").exists() else "/tmp/qwen3-vl-demo-state"
+    state_dir = Path(os.environ.get("DEMO_STATE_DIR", default_state))
     manager = DemoModelManager(
         os.environ.get("CKPTDIR", "/mnt/nvme/huggingface"),
         os.environ.get("QWEN3_FP8_KERNEL_DIR"),

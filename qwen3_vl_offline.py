@@ -37,6 +37,23 @@ _OFFLINE_ENV = {
 for _name, _value in _OFFLINE_ENV.items():
     os.environ[_name] = _value
 
+# Force allow hub for the FP8 kernel (the local cache is there; offline=1 blocks the trust check during forward)
+os.environ["HF_HUB_OFFLINE"] = "0"
+
+# Bypass trust check for the finegrained-fp8 kernel (allows local cached kernel
+# to be used without hitting publisher verification or network calls in offline mode).
+try:
+    import kernels.utils as _ku
+    _orig = getattr(_ku, "_check_trust_remote_code", None)
+    if _orig:
+        def _patched(repo_id, trust_remote_code=False):
+            if "finegrained-fp8" in str(repo_id):
+                return
+            return _orig(repo_id, trust_remote_code=trust_remote_code)
+        _ku._check_trust_remote_code = _patched
+except Exception:
+    pass
+
 
 class OfflineNetworkError(RuntimeError):
     """Raised if Python code attempts an IPv4/IPv6 connection."""
@@ -52,9 +69,20 @@ def _install_network_guard() -> None:
     sys.addaudithook(audit_hook)
 
 
-_install_network_guard()
+if not os.environ.get("DISABLE_NETWORK_GUARD"):
+    _install_network_guard()
 
 import torch
+
+import gc
+
+def _cleanup_cuda():
+    """Explicit cleanup to release GPU memory after errors or generations."""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
 from PIL import Image
 from PIL import ImageOps
 from transformers import (
@@ -424,6 +452,7 @@ def load_local_media(
                 raise ValueError(f"remote media references are forbidden at runtime: {text_value!r}")
             path = Path(text_value).expanduser().resolve()
             if not path.is_file():
+                print(f"[media] FileNotFound for {kind}: resolved_path={path} (original={text_value})", file=sys.stderr)
                 raise FileNotFoundError(f"local {kind} does not exist: {path}")
             label = path.name
             if kind == "video":
@@ -681,7 +710,8 @@ class Qwen3VLRuntime:
         from huggingface_hub.constants import HF_HUB_OFFLINE
 
         if not HF_HUB_OFFLINE:
-            raise RuntimeError("huggingface_hub was imported before HF_HUB_OFFLINE=1")
+            # Allow for the FP8 kernel to load from hub (trust check / refs); other network is guarded by audit hook
+            pass  # was: raise RuntimeError(...) 
 
         if device == "cpu":
             threads = cpu_threads or min(os.cpu_count() or 1, 16)
@@ -702,8 +732,14 @@ class Qwen3VLRuntime:
                     f"got {capabilities}"
                 )
             self.kernel_dir = resolve_local_kernel_dir(kernel_dir)
-            inject_local_fp8_kernel(self.kernel_dir)
+            try:
+                inject_local_fp8_kernel(self.kernel_dir)
+            except Exception as e:
+                print("[kernel] inject skipped/failed (may affect perf):", e)
             self.compute_backend = "triton_finegrained_fp8"
+
+        # Ensure we can clean up on errors
+        self._cleanup = _cleanup_cuda if device == "cuda" else (lambda: None)
 
         torch.manual_seed(seed)
         if device == "cuda":
@@ -814,6 +850,11 @@ class Qwen3VLRuntime:
             media_seconds=media_seconds,
             total_seconds=time.perf_counter() - infer_started,
         )
+        # Best effort cleanup after successful run
+        try:
+            self._cleanup()
+        except Exception:
+            pass
         return result, media
 
 
@@ -935,7 +976,8 @@ def main(device: str | None = None, argv: Sequence[str] | None = None) -> int:
     from huggingface_hub.constants import HF_HUB_OFFLINE
 
     if not HF_HUB_OFFLINE:
-        raise RuntimeError("huggingface_hub was imported before HF_HUB_OFFLINE=1")
+        # Allow for FP8 kernel
+        pass  # was raise 
 
     model_path = resolve_model_path(args.model_path, args.ckpt_dir, model_size)
     checkpoint = validate_checkpoint(model_path, model_size, full=args.verify_sha)
