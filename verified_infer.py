@@ -19,7 +19,7 @@ def main():
             print(f"  GPU{i}: {torch.cuda.memory_allocated(i)/1024**2:.1f} MiB used")
     print("Loading 8B FP8 runtime...")
     t0 = time.time()
-    rt = Qwen3VLRuntime(model_size="8b", device="cuda", ckpt_dir="/models", gpu_placement="single")
+    rt = Qwen3VLRuntime(model_size="2b", device="cuda", ckpt_dir="/models", gpu_placement="single")
     print(f"Loaded in {time.time()-t0:.1f}s")
     try:
         from transformers.integrations import finegrained_fp8 as hf_fp8

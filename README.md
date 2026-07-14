@@ -51,7 +51,7 @@ export STATE=/mnt/nvme2/qwen3_vl_demo_state
 ./docker/run_demo.sh "$MODELS" "$STATE" 8001
 ```
 
-С ноутбука: `ssh -N -L 8001:127.0.0.1:8001 tuna-server` → `http://127.0.0.1:8001`. На сервере сейчас доступна **8B FP8**; 2B/4B появятся после `download`.
+С ноутбука: `ssh -N -L 8001:127.0.0.1:8001 tuna-server` → `http://127.0.0.1:8001`. Для быстрой разработки и тестирования используйте **2B FP8** (`--model 2b`). 8B только для финальных бенчмарков и проверок точности.
 
 ## GPU FP8 inference
 

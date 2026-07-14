@@ -547,7 +547,7 @@ def create_app(
                 request.keep_model_loaded,
                 unload_if_idle=False,
             )
-            runtime = manager.load(request.model_id, request.placement)
+            runtime = manager.load(request.model_id, request.placement, yarn_1m=True)
             response = {
                 "ok": True,
                 "model_id": runtime.model_size,
@@ -690,7 +690,7 @@ def create_app(
         prompt: str = Form("Locate the main objects. Report bbox coordinates in JSON format."),
         max_new_tokens: int = Form(256),
         max_image_side: int = Form(640),
-        model_size: str = Form("8b"),
+        model_size: str = Form("2b"),
     ):
         """2D Grounding mode.
 
@@ -715,7 +715,7 @@ def create_app(
         # obtain runtime
         try:
             with manager.operation():
-                rt = manager.load(model_size, "single")
+                rt = manager.load(model_size, "single", yarn_1m=True)
         except DemoBusyError:
             raise HTTPException(503, "model is busy")
         except Exception as exc:
@@ -790,7 +790,7 @@ def create_app(
         prompt: str = Form("Find all cars in this image. For each car, provide its 3D bounding box [x, y, z, x_size, y_size, z_size, pitch, yaw, roll] and label in JSON format."),
         max_new_tokens: int = Form(256),
         max_image_side: int = Form(640),
-        model_size: str = Form("8b"),
+        model_size: str = Form("2b"),
         fov: float = Form(60.0),
     ):
         """3D Grounding mode.
@@ -815,7 +815,7 @@ def create_app(
 
         try:
             with manager.operation():
-                rt = manager.load(model_size, "single")
+                rt = manager.load(model_size, "single", yarn_1m=True)
         except DemoBusyError:
             raise HTTPException(503, "model busy")
         except Exception as exc:
@@ -959,7 +959,7 @@ def create_app(
                 failure: str | None = None
                 try:
                     generation.emit({"type": "loading", "state": "loading_model"})
-                    runtime = manager.load(model_key, placement)
+                    runtime = manager.load(model_key, placement, yarn_1m=True)
                     generation.emit(
                         {
                             "type": "loading",

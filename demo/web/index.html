@@ -1230,11 +1230,11 @@
 
     .task-row {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       gap: 7px;
-      overflow-x: auto;
       padding: 11px 12px 8px;
-      scrollbar-width: none;
+      overflow: visible;
     }
 
     .task-row::-webkit-scrollbar {
@@ -1793,7 +1793,7 @@
             <details class="advanced" id="advancedSettings">
               <summary>Generation settings</summary>
               <div class="advanced-grid">
-                <label class="advanced-field"><span class="field-label">Max tokens</span><input class="number-input" id="maxTokens" type="number" min="1" max="40960" step="1" value="2048"></label>
+                <label class="advanced-field"><span class="field-label">Max tokens</span><input class="number-input" id="maxTokens" type="number" min="1" max="131072" step="1" value="8192"></label>
                 <label class="advanced-field"><span class="field-label">Max image side</span><input class="number-input" id="maxImageSide" type="number" min="64" max="4096" step="64" value="640"></label>
                 <label class="advanced-field"><span class="field-label">Sampling</span><span class="toggle-field"><input id="doSample" type="checkbox" checked> Enable</span></label>
                 <label class="advanced-field"><span class="field-label">Temperature</span><input class="number-input" id="temperature" type="number" min="0.01" max="5" step="0.05" value="0.6"></label>
@@ -2115,7 +2115,7 @@
       function updatePlacements() {
         const model = selectedModel();
         const placements = model && Array.isArray(model.placements) && model.placements.length ? model.placements : ["single", "balanced"];
-        const preferred = saved.placement || elements.placementSelect.value || "single";
+        const preferred = saved.placement || elements.placementSelect.value || "balanced";
         elements.placementSelect.replaceChildren();
         for (const placement of placements) {
           const option = node("option", "", placement === "single" ? "Single GPU" : placement === "balanced" ? "Balanced" : placement);
@@ -3028,7 +3028,10 @@
           state.active.stage = result.stopped ? "Stopped" : result.truncated ? "Completed · truncated" : "Completed";
           state.generating = false;
           elements.generationCard.className = "generation-card done";
-          clearFiles();
+          const isGroundingTask = state.selectedTask === "grounding_2d" || state.selectedTask === "grounding_3d" || (state.selectedTask || "").includes("ground");
+          if (!isGroundingTask) {
+            clearFiles();
+          }
           updateSendState();
           renderStatus();
           announce(state.active.stage);
@@ -3415,19 +3418,34 @@
     // when "grounding_2d" task (or output looks like grounding JSON) is used.
     function parseGroundingClient(text) {
       if (!text || typeof text !== 'string') return [];
+      let out = [];
       let t = text.trim();
-      // strip markdown
       t = t.replace(/```json?/gi, '').replace(/```/g, '').trim();
-      // try to extract JSON array or object
-      let match = t.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
-      if (match) t = match[1];
+      // strict JSON
       try {
         let data = JSON.parse(t);
         if (!Array.isArray(data)) data = [data];
-        return data.filter(item => item && (item.bbox_2d || item.point_2d));
-      } catch (e) {
-        return [];
+        for (let item of data) {
+          if (item && (item.bbox_2d || item.point_2d)) out.push(item);
+        }
+      } catch(e) {}
+      if (out.length) return out;
+      // loose bbox [x1,y1,x2,y2]
+      let bboxRe = /\[?\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]?/g;
+      let m, i=0;
+      while ((m = bboxRe.exec(text)) && i<20) {
+        out.push({bbox_2d: [parseInt(m[1]),parseInt(m[2]),parseInt(m[3]),parseInt(m[4])], label: 'obj'+(i+1)});
+        i++;
       }
+      if (out.length) return out;
+      // loose points
+      let ptRe = /\[?\s*(\d+)\s*,\s*(\d+)\s*\]?/g;
+      i=0;
+      while ((m = ptRe.exec(text)) && i<20) {
+        out.push({point_2d: [parseInt(m[1]),parseInt(m[2])], label: 'pt'+(i+1)});
+        i++;
+      }
+      return out;
     }
 
     function drawGroundingOnCanvas(img, parsed) {

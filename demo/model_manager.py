@@ -329,7 +329,7 @@ class DemoModelManager:
             )
         return result
 
-    def load(self, model_size: str, placement: str) -> Any:
+    def load(self, model_size: str, placement: str, yarn_1m: bool = True) -> Any:
         model_key = normalize_model_size(model_size)
         if placement not in PLACEMENTS:
             raise ValueError(f"unsupported placement: {placement}")
@@ -366,6 +366,7 @@ class DemoModelManager:
                 ckpt_dir=str(self.ckpt_dir),
                 kernel_dir=self.kernel_dir,
                 gpu_placement=placement,
+                yarn_1m=yarn_1m,
             )
         except Exception:
             with self._state_lock:

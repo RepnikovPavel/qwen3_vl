@@ -16,7 +16,7 @@ from evaluate_vl import (
 )
 
 
-MAX_NEW_TOKENS = 40_960
+MAX_NEW_TOKENS = 131_072  # increased for longer thinking / large context
 MIN_IMAGE_SIDE = 64
 MAX_IMAGE_SIDE = 4096
 MAX_CUSTOM_PROMPT_CHARACTERS = 200_000
@@ -102,7 +102,7 @@ class DemoPreset:
 GROUNDING_PRESET = DemoPreset(
     key="grounding_2d",
     label="2D Grounding (bbox / points)",
-    prompt=None,
+    prompt='Locate every instance that belongs to the following categories: "car, taxi, person, building, sign, road marking". Report bbox coordinates in JSON format like [{"bbox_2d": [x1, y1, x2, y2], "label": "car"}]. Be complete.',
     output_kind="text",  # we post-process on client/server
     default_max_new_tokens=256,
     default_max_image_side=640,

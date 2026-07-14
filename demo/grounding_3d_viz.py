@@ -36,32 +36,44 @@ if _FONT is None:
     _FONT = ImageFont.load_default()
 
 def parse_bbox_3d_from_text(text: str) -> list[dict[str, Any]]:
-    """Parse 3D bbox JSON from model response text."""
+    """Parse 3D bbox JSON from model response text.
+    Handles strict and loose 9-value tuples.
+    """
+    results = []
     if not text:
-        return []
+        return results
+    t = text
     try:
-        if "```json" in text:
-            start = text.find("```json") + 7
-            end = text.find("```", start)
-            if end != -1:
-                json_str = text[start:end].strip()
-            else:
-                json_str = text[start:].strip()
+        if "```json" in t:
+            s = t.find("```json") + 7
+            e = t.find("```", s)
+            js = t[s:e].strip() if e > s else t[s:].strip()
         else:
-            start = text.find("[")
-            end = text.rfind("]")
-            if start != -1 and end != -1:
-                json_str = text[start:end + 1]
-            else:
-                return []
-        data = json.loads(json_str)
+            s = t.find("[")
+            e = t.rfind("]")
+            js = t[s:e+1] if s >= 0 and e > s else t
+        data = json.loads(js)
         if isinstance(data, dict):
             data = [data]
-        if not isinstance(data, list):
-            return []
-        return [item for item in data if isinstance(item, dict) and "bbox_3d" in item]
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and "bbox_3d" in item:
+                    results.append(item)
+                elif isinstance(item, (list, tuple)) and len(item) >= 9:
+                    results.append({"bbox_3d": list(item[:9]), "label": f"obj{len(results)}"})
     except Exception:
-        return []
+        pass
+
+    if results:
+        return results
+
+    # loose 9-number
+    import re
+    pat = re.compile(r'[\(\[]\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*[\)\]]')
+    for m in pat.finditer(text):
+        vals = [float(x) for x in m.groups()]
+        results.append({"bbox_3d": vals, "label": f"obj{len(results)}"})
+    return results
 
 def generate_camera_params(image: Image.Image, fov: float = 60.0) -> dict[str, float]:
     """Generate default camera intrinsics based on image size and FoV."""

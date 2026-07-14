@@ -67,41 +67,50 @@ def _clean_json_text(text: str) -> str:
 
 def parse_grounding(text: str) -> list[dict[str, Any]]:
     """Best-effort parse of grounding JSON from model text.
-
-    Returns list of dicts. Each has either "bbox_2d" or "point_2d".
+    Handles strict JSON objects and also loose [x1,y1,x2,y2] or [x,y] mentions in text.
+    Returns list of dicts with "bbox_2d" or "point_2d" + generated label.
     """
     if not text:
         return []
+    out = []
     cleaned = _clean_json_text(text)
+
+    # 1. Try strict JSON first
     try:
         data = json.loads(cleaned)
+        if isinstance(data, dict):
+            data = [data]
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and ("bbox_2d" in item or "point_2d" in item):
+                    out.append(item)
     except Exception:
-        # fallback to ast.literal_eval on truncated
-        try:
-            import ast
-            data = ast.literal_eval(cleaned)
-        except Exception:
-            # last resort: find the last [...] or {...} that looks like list of dicts
-            m = re.search(r"(\[[\s\S]*\]|\{[\s\S]*\})", text)
-            if m:
-                try:
-                    data = json.loads(m.group(1))
-                except Exception:
-                    return []
-            else:
-                return []
+        pass
 
-    if isinstance(data, dict):
-        data = [data]
-    if not isinstance(data, list):
-        return []
+    if out:
+        return out
 
-    out = []
-    for item in data:
-        if not isinstance(item, dict):
+    # 2. Fallback: extract loose coordinate lists from the raw text
+    # bbox like [282, 522, 359, 589] or (282,522,359,589)
+    bbox_pattern = re.compile(r'[\(\[]\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*[\)\]]')
+    for i, m in enumerate(bbox_pattern.finditer(text)):
+        x1, y1, x2, y2 = map(int, m.groups())
+        out.append({"bbox_2d": [x1, y1, x2, y2], "label": f"obj{i+1}"})
+
+    if out:
+        return out
+
+    # 3. Points [x, y]
+    point_pattern = re.compile(r'[\(\[]\s*(\d+)\s*,\s*(\d+)\s*[\)\]]')
+    seen = set()
+    for i, m in enumerate(point_pattern.finditer(text)):
+        x, y = map(int, m.groups())
+        key = (x, y)
+        if key in seen:
             continue
-        if "bbox_2d" in item or "point_2d" in item:
-            out.append(item)
+        seen.add(key)
+        out.append({"point_2d": [x, y], "label": f"pt{i+1}"})
+
     return out
 
 
