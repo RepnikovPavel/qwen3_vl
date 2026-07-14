@@ -299,6 +299,64 @@ class DownloadModelTest(unittest.TestCase):
             download_models.main(["2b", "--revision", "mutable-branch"])
         self.assertEqual(raised.exception.code, 2)
 
+    def _fake_hub_tree_payload(self, spec):
+        """Build a Hub /tree/main file list in the current API shape (lfs.oid)."""
+        entries = []
+        for artifact in spec.required_files:
+            entries.append(
+                {"type": "file", "path": artifact.filename, "size": artifact.size_bytes}
+            )
+        for shard in spec.weight_shards:
+            # Current Hub API exposes the LFS content hash as "oid" (Git-LFS),
+            # not "sha256". Older responses used "sha256"; both must be honoured.
+            entries.append(
+                {
+                    "type": "file",
+                    "path": shard.filename,
+                    "size": shard.size_bytes,
+                    "lfs": {"oid": shard.sha256, "size": shard.size_bytes},
+                }
+            )
+        return entries
+
+    def test_query_remote_tree_accepts_lfs_oid_digest(self):
+        """The Hub tree API exposes LFS digests as `oid`, not `sha256`.
+
+        Regression: _query_remote_tree read only `lfs.sha256`, so every fresh
+        download failed at the pinned-digest guard with "unexpected digest".
+        """
+        spec = MODEL_SPECS["2b"]
+        payload = json.dumps(self._fake_hub_tree_payload(spec))
+        completed = mock.Mock(returncode=0, stdout=payload, stderr="")
+        with (
+            mock.patch.object(download_models, "_wget_binary", return_value="wget"),
+            mock.patch.object(download_models, "_wget_environment", return_value={}),
+            mock.patch("subprocess.run", return_value=completed),
+            mock.patch("sys.stderr", new=io.StringIO()),
+        ):
+            remote = download_models._query_remote_tree(spec)
+        # Every manifest + shard file is present, keyed by filename.
+        self.assertIn("config.json", remote)
+        self.assertIn(spec.weight_shards[0].filename, remote)
+
+    def test_query_remote_tree_rejects_wrong_digest(self):
+        spec = MODEL_SPECS["2b"]
+        payload = self._fake_hub_tree_payload(spec)
+        # Tamper with the LFS digest while keeping the Git-LFS field name "oid".
+        for entry in payload:
+            if entry.get("path") == spec.weight_shards[0].filename:
+                entry["lfs"]["oid"] = "0" * 64
+        completed = mock.Mock(returncode=0, stdout=json.dumps(payload), stderr="")
+        with (
+            mock.patch.object(download_models, "_wget_binary", return_value="wget"),
+            mock.patch.object(download_models, "_wget_environment", return_value={}),
+            mock.patch("subprocess.run", return_value=completed),
+            self.assertRaisesRegex(
+                download_models.ModelDownloadError, "unexpected digest"
+            ),
+        ):
+            download_models._query_remote_tree(spec)
+
 
 if __name__ == "__main__":
     unittest.main()

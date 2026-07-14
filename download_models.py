@@ -297,7 +297,12 @@ def _query_remote_tree(spec: ModelSpec) -> dict[str, dict[str, Any]]:
             )
     for shard in spec.weight_shards:
         lfs = remote[shard.filename].get("lfs")
-        remote_sha256 = lfs.get("sha256") if isinstance(lfs, dict) else None
+        # The Hub tree API exposes the LFS content hash as "oid" (the Git-LFS
+        # field name); older API revisions called it "sha256". Accept either so
+        # the pinned-digest guard keeps working across API versions.
+        remote_sha256 = None
+        if isinstance(lfs, dict):
+            remote_sha256 = lfs.get("sha256") or lfs.get("oid")
         if remote_sha256 != shard.sha256:
             raise ModelDownloadError(
                 f"pinned repository reports an unexpected digest for {shard.filename}"
