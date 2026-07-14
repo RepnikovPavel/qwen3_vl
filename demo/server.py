@@ -702,6 +702,11 @@ def create_app(
         if not (image.content_type or "").startswith("image/"):
             raise HTTPException(400, "2D grounding currently supports single images")
 
+        # Align *exactly* to cookbooks/2d_grounding.ipynb phrasing so the model emits
+        # the trained format: JSON array of objects with "bbox_2d" + "label".
+        if "Report bbox coordinates in JSON format" not in prompt:
+            prompt = prompt.rstrip(". ") + ' Report bbox coordinates in JSON format like [{"bbox_2d": [x1, y1, x2, y2], "label": "car"}].'
+
         media_root = Path(os.environ.get("DEMO_STATE_DIR", "/state")) / "media"
         media_root.mkdir(parents=True, exist_ok=True)
 
@@ -750,7 +755,14 @@ def create_app(
             raw = rt.processor.batch_decode(
                 cont, skip_special_tokens=True, clean_up_tokenization_spaces=False
             )[0]
+            # If Thinking model used <think>, prefer the part after it for the "final" text
+            # (this makes returned text + client viz cleaner, matching chat flow split).
             clean_text = raw.strip()
+            if "</think>" in raw:
+                try:
+                    clean_text = raw.split("</think>", 1)[1].strip()
+                except Exception:
+                    clean_text = raw.strip()
 
             parsed = parse_grounding(clean_text)
             orig = Image.open(tmp_path).convert("RGB")
@@ -803,6 +815,10 @@ def create_app(
         if not (image.content_type or "").startswith("image/"):
             raise HTTPException(400, "3D grounding supports single images")
 
+        # Align to cookbook 3d prompts
+        if "JSON" not in prompt and "bbox_3d" not in prompt.lower():
+            prompt = prompt.rstrip(". ") + ". The output format required is JSON."
+
         media_root = Path(os.environ.get("DEMO_STATE_DIR", "/state")) / "media"
         media_root.mkdir(parents=True, exist_ok=True)
 
@@ -839,6 +855,11 @@ def create_app(
             cont = out.sequences[:, inputs["input_ids"].shape[1]:]
             raw = rt.processor.batch_decode(cont, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
             clean_text = raw.strip()
+            if "</think>" in raw:
+                try:
+                    clean_text = raw.split("</think>", 1)[1].strip()
+                except Exception:
+                    clean_text = raw.strip()
 
             parsed = parse_bbox_3d_from_text(clean_text)
             orig = Image.open(tmp_path).convert("RGB")
@@ -900,9 +921,10 @@ def create_app(
                 effective_prompt = user_prompt or resolved["prompt"]
                 if resolved.get("task") == "grounding_2d" and effective_prompt:
                     # Use phrasing from the official cookbooks/2d_grounding.ipynb so the model emits
-                    # the trained format: a JSON array of {"bbox_2d": [x1,y1,x2,y2], "label": "..."} (0-1000 normalized)
+                    # the trained format (JSON array with bbox_2d + label). The chat textarea provides
+                    # the locate instruction; we append only the format part.
                     if "Report bbox coordinates in JSON format" not in effective_prompt:
-                        effective_prompt = effective_prompt.rstrip() + '. Report bbox coordinates in JSON format.'
+                        effective_prompt = effective_prompt.rstrip() + ' Report bbox coordinates in JSON format like [{"bbox_2d": [x1, y1, x2, y2], "label": "car"}].'
                 if resolved.get("task") == "grounding_3d" and effective_prompt:
                     if "provide its 3D bounding box" not in effective_prompt.lower() and "bbox_3d" not in effective_prompt.lower():
                         effective_prompt = effective_prompt.rstrip() + ' Provide 3D bounding boxes in JSON format.'
@@ -1019,9 +1041,10 @@ def create_app(
                         assistant_content = (
                             "[stopped]" if result.stopped else "[empty response]"
                         )
+                    # Record the prompt the user actually typed in chat (not the internal format suffix we added for grounding).
                     store.append_turn(
                         session_id,
-                        effective_prompt,
+                        user_prompt or effective_prompt,
                         assistant_content,
                         reasoning=result.reasoning,
                         metrics={
