@@ -62,11 +62,9 @@ def model_input_devices(model: Any) -> tuple[Any, Any]:
     if visual is None:
         raise RuntimeError("Qwen3-VL visual module was not found")
     visual_device = next(visual.parameters()).device
-    if visual_device != embedding_device:
-        raise RuntimeError(
-            f"vision and input embeddings must share a device; got "
-            f"{visual_device} and {embedding_device}"
-        )
+    # Support split placement (balanced) for full GPU utilization on multi-GPU VL models.
+    # Vision tower and text embeddings may legitimately be on different devices.
+    # move_inputs_to_model_devices handles routing correctly per key.
     return embedding_device, visual_device
 
 

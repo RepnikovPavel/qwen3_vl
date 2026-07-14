@@ -104,7 +104,7 @@ GROUNDING_PRESET = DemoPreset(
     label="2D Grounding (bbox / points)",
     prompt=None,
     output_kind="text",  # we post-process on client/server
-    default_max_new_tokens=256,
+    default_max_new_tokens=1024,
     default_max_image_side=640,
     accepts_custom_prompt=True,
 )
@@ -114,7 +114,7 @@ GROUNDING_3D_PRESET = DemoPreset(
     label="3D Grounding (3D bboxes)",
     prompt=None,
     output_kind="text",  # post-process for 3D viz
-    default_max_new_tokens=256,
+    default_max_new_tokens=1024,
     default_max_image_side=640,
     accepts_custom_prompt=True,
 )
@@ -170,7 +170,7 @@ _PRESET_ITEMS = (
         label="Custom prompt",
         prompt=None,
         output_kind="text",
-        default_max_new_tokens=2048,
+        default_max_new_tokens=16384,
         default_max_image_side=640,
         accepts_custom_prompt=True,
     ),
@@ -181,10 +181,11 @@ _PRESET_ITEMS = (
         label="Video understanding",
         prompt=(
             "Analyze the video in detail. Describe the sequence of events, key actions, objects, "
-            "any visible text or signs, and how the scene evolves over time. Be precise and chronological."
+            "any visible text or signs, and how the scene evolves over time. Be precise and chronological. "
+            "Use as many tokens as needed for complete coverage."
         ),
         output_kind="text",
-        default_max_new_tokens=4096,
+        default_max_new_tokens=8192,
         default_max_image_side=640,
     ),
     DemoPreset(
@@ -193,10 +194,10 @@ _PRESET_ITEMS = (
         prompt=(
             "Parse the document or screenshot thoroughly. Extract headings, paragraphs, tables "
             "(as markdown or structured text), lists, key facts, and describe any embedded images or diagrams. "
-            "Preserve logical reading order and structure."
+            "Preserve logical reading order and structure. Use long output if the document is complex."
         ),
         output_kind="text",
-        default_max_new_tokens=8192,
+        default_max_new_tokens=16384,
         default_max_image_side=1280,
     ),
     DemoPreset(
@@ -216,10 +217,11 @@ _PRESET_ITEMS = (
         label="Think step-by-step",
         prompt=(
             "Examine the visual input carefully. Think step by step (internal reasoning first), "
-            "then provide a clear, well-structured final answer. Cover observations, ambiguities, and conclusions."
+            "then provide a clear, well-structured final answer. Cover observations, ambiguities, and conclusions. "
+            "You may use up to tens of thousands of tokens for detailed reasoning if needed."
         ),
         output_kind="text",
-        default_max_new_tokens=4096,
+        default_max_new_tokens=32768,
         default_max_image_side=640,
     ),
 )

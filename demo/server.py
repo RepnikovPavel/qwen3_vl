@@ -722,7 +722,7 @@ def create_app(
         # obtain runtime
         try:
             with manager.operation():
-                rt = manager.load(model_size, "single", yarn_1m=True)
+                rt = manager.load(model_size, "balanced", yarn_1m=True)
         except DemoBusyError:
             raise HTTPException(503, "model is busy")
         except Exception as exc:
@@ -833,7 +833,7 @@ def create_app(
 
         try:
             with manager.operation():
-                rt = manager.load(model_size, "single", yarn_1m=True)
+                rt = manager.load(model_size, "balanced", yarn_1m=True)
         except DemoBusyError:
             raise HTTPException(503, "model busy")
         except Exception as exc:
@@ -891,7 +891,7 @@ def create_app(
     async def chat(
         session_id: str = Form(...),
         model_id: str = Form(...),
-        placement: str = Form("single"),
+        placement: str = Form("balanced"),
         task: str = Form("describe"),
         custom_prompt: str | None = Form(None),
         max_new_tokens: int | None = Form(None),
