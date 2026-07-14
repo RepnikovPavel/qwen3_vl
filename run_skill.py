@@ -162,11 +162,13 @@ def run_skill(args) -> dict[str, Any]:
         else None
     )
     annotated_path: str | None = None
-    if skill.is_spatial and args.image and parsed:
-        out_dir = Path(args.output_dir).expanduser() if args.output_dir else Path(args.image).parent
+    # args.image is a list (action="append"); drawing uses the first frame.
+    first_image = args.image[0] if args.image else None
+    if skill.is_spatial and first_image and parsed:
+        out_dir = Path(args.output_dir).expanduser() if args.output_dir else Path(first_image).parent
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{Path(args.image).stem}_{args.skill}_annotated.png"
-        annotated_path = _draw_spatial(args.image, parsed, skill, scale or 1000, out_path)
+        out_path = out_dir / f"{Path(first_image).stem}_{args.skill}_annotated.png"
+        annotated_path = _draw_spatial(first_image, parsed, skill, scale or 1000, out_path)
     return {
         "skill": resolved,
         "model": runtime.spec.repo_id,
