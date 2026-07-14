@@ -688,8 +688,8 @@ def create_app(
     async def grounding(
         image: UploadFile = File(...),
         prompt: str = Form('Locate every instance that belongs to the following categories: "car, person, vehicle". Report bbox coordinates in JSON format.'),
-        max_new_tokens: int = Form(256),
-        max_image_side: int = Form(640),
+        max_new_tokens: int = Form(4096),
+        max_image_side: int = Form(2048),
         model_size: str = Form("2b"),
     ):
         """2D Grounding mode.
@@ -767,7 +767,13 @@ def create_app(
                     clean_text = raw.strip()
 
             parsed = parse_grounding(clean_text)
-            orig = Image.open(tmp_path).convert("RGB")
+            # Use exactly the image that was fed to the model (post any resize in prepare_media)
+            # so that bbox coordinates match the displayed image.
+            if media and len(media) > 0 and media[0].kind == "image" and hasattr(media[0], "value") and media[0].value is not None:
+                base_for_draw = media[0].value
+            else:
+                base_for_draw = Image.open(tmp_path)
+            orig = base_for_draw.convert("RGB")
             annotated = draw_grounding(orig, parsed)
             ann_name = f"ground_{uuid.uuid4().hex}.png"
             ann_path = media_root / ann_name
@@ -802,8 +808,8 @@ def create_app(
     async def grounding_3d(
         image: UploadFile = File(...),
         prompt: str = Form('Find all cars in this image. For each car, provide its 3D bounding box. The output format required is JSON.'),
-        max_new_tokens: int = Form(256),
-        max_image_side: int = Form(640),
+        max_new_tokens: int = Form(4096),
+        max_image_side: int = Form(2048),
         model_size: str = Form("2b"),
         fov: float = Form(60.0),
     ):

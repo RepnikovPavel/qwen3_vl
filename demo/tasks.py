@@ -104,7 +104,7 @@ GROUNDING_PRESET = DemoPreset(
     label="2D Grounding (bbox / points)",
     prompt=None,
     output_kind="text",  # we post-process on client/server
-    default_max_new_tokens=1024,
+    default_max_new_tokens=4096,
     default_max_image_side=640,
     accepts_custom_prompt=True,
 )
@@ -114,7 +114,7 @@ GROUNDING_3D_PRESET = DemoPreset(
     label="3D Grounding (3D bboxes)",
     prompt=None,
     output_kind="text",  # post-process for 3D viz
-    default_max_new_tokens=1024,
+    default_max_new_tokens=4096,
     default_max_image_side=640,
     accepts_custom_prompt=True,
 )

@@ -2425,6 +2425,14 @@
           if (task.default_max_new_tokens) elements.maxTokens.value = task.default_max_new_tokens;
           if (task.default_max_image_side) elements.maxImageSide.value = task.default_max_image_side;
         }
+        // For 2D/3D grounding, prefer higher res (to recognize many objects) and higher token budget
+        // so that long lists of bboxes + descriptions are not truncated.
+        if (task && (task.key === "grounding_2d" || task.key === "grounding_3d")) {
+          const curSide = parseInt(elements.maxImageSide.value || "0", 10);
+          if (curSide < 2048) elements.maxImageSide.value = 2048;
+          const curTok = parseInt(elements.maxTokens.value || "0", 10);
+          if (curTok < 4096) elements.maxTokens.value = 4096;
+        }
         const label = task ? task.label || task.key : "vision task";
         elements.composerHint.replaceChildren();
         const strong = node("strong", "", label);
@@ -3063,6 +3071,42 @@
         };
       }
 
+      async function resizeImageFileToMaxSide(file, maxSide) {
+        if (!file || !file.type || !file.type.startsWith("image/") || !maxSide || maxSide <= 0) {
+          return file;
+        }
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = function(ev) {
+            const img = new Image();
+            img.onload = function() {
+              const w = img.width, h = img.height;
+              if (Math.max(w, h) <= maxSide) {
+                resolve(file);
+                return;
+              }
+              const scale = maxSide / Math.max(w, h);
+              const cw = Math.round(w * scale);
+              const ch = Math.round(h * scale);
+              const canvas = document.createElement("canvas");
+              canvas.width = cw;
+              canvas.height = ch;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(img, 0, 0, cw, ch);
+              canvas.toBlob(function(blob) {
+                if (blob) {
+                  resolve(new File([blob], file.name, {type: file.type}));
+                } else {
+                  resolve(file);
+                }
+              }, file.type, 0.92);
+            };
+            img.src = ev.target.result;
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+
       async function sendChat() {
         if (state.generating) return;
         if (state.selectedTask === "custom" && !elements.customPrompt.value.trim()) {
@@ -3088,6 +3132,24 @@
             return;
           }
           await ensureModel();
+          // Resize images client-side to the chosen max_image_side so that the image shown in liveVisual
+          // and history is *exactly* the resolution fed to the model (no surprise resize on server).
+          // This makes bbox drawing accurate and fulfills "see the exact image that entered the model".
+          const maxSide = parseInt(elements.maxImageSide.value || "2048", 10);
+          for (let i = 0; i < state.files.length; i++) {
+            const item = state.files[i];
+            if (item.file && item.file.type && item.file.type.startsWith("image/")) {
+              const resized = await resizeImageFileToMaxSide(item.file, maxSide);
+              if (resized !== item.file) {
+                if (item.objectUrl) URL.revokeObjectURL(item.objectUrl);
+                item.file = resized;
+                item.objectUrl = URL.createObjectURL(resized);
+              }
+            }
+          }
+          // re-render previews with (possibly) resized versions
+          renderFilePreviews();
+
           state.optimistic = optimisticMessage();
           renderConversation();
           beginGeneration("Uploading media");
