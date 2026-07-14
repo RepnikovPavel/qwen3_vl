@@ -28,6 +28,8 @@ SKILLS=(
   document_parsing_html document_parsing_md
   spatial_understanding think_detailed omni_recognition
   2d_grounding 3d_grounding mmcode computer_use mobile_agent
+  nuscenes_2d_detection nuscenes_lane
+  nuscenes_scene_graph nuscenes_drivable_area
 )
 
 printf "%-22s %-10s %-12s %-10s %-8s\n" "SKILL" "MEDIAN(s)" "TOK/S" "VRAM(MB)" "VERIFIED"

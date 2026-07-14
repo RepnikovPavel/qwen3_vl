@@ -59,15 +59,21 @@ export STATE="$WORK/qwen3_vl_demo_state"
 
 ## Skills (cookbook capabilities)
 
-17 reproducible skills derived from the official Qwen3-VL cookbooks, runnable
-locally through the CLI. See [`docs/skills.md`](docs/skills.md) for the full
-skill → cookbook mapping and coordinate conventions.
+21 skills: 17 reproducing the official Qwen3-VL cookbooks plus 4
+auto-labelling skills that turn the 2B Thinking FP8 model into a weak
+annotator for driving scenes (nuScenes-style). See
+[`docs/skills.md`](docs/skills.md) for the full skill → cookbook mapping and
+coordinate conventions.
 
 ```bash
 qwen3-vl skills                                       # list all skills
 qwen3-vl skill --skill 2d_grounding --model 2b --image scene.jpg
 qwen3-vl skill --skill ocr_spotting --model 2b --image receipt.png
 qwen3-vl skill --skill video_understanding --model 2b --image-dir frames/ --num-frames 8
+qwen3-vl skill --skill nuscenes_2d_detection --model 2b --image drive.jpg
+qwen3-vl skill --skill nuscenes_lane --model 2b --image drive.jpg
+qwen3-vl skill --skill nuscenes_scene_graph --model 2b --image drive.jpg
+qwen3-vl skill --skill nuscenes_drivable_area --model 2b --image drive.jpg
 ```
 
 Single-image skills (`describe`, `ocr`, `ocr_spotting`, `2d_grounding`,
@@ -77,6 +83,14 @@ sequences (`video_understanding`, `long_document`), and agent/code skills
 prompt, output kind, input modality, and the correct coordinate scale
 (0–1000 grounding vs 0–999 OCR/mobile). Grounding skills also render an
 annotated image.
+
+### Auto-labelling skills (driving)
+
+The four `nuscenes_*` skills emit structured pseudo-labels (2D bboxes, lane
+polylines, scene-graph triples, a drivable-area polygon) in the [0,1000]
+image frame, tolerant of the 2B Thinking model's narrative output. See
+[`docs/skills.md`](docs/skills.md#auto-labelling-skills-weak-annotator-for-driving-scenes)
+for the class vocabularies and the tolerant-parsing contract.
 
 ## GPU FP8 inference
 

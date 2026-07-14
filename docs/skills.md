@@ -41,6 +41,10 @@ qwen3-vl skill --skill video_understanding --model 2b --video clip.mp4
 | `mmcode` | mmcode.ipynb | code (HTML/py) | single image | — |
 | `computer_use` | computer_use.ipynb | JSON action | single image | 0–1000 |
 | `mobile_agent` | mobile_agent.ipynb | JSON action | single image | 0–999 |
+| `nuscenes_2d_detection` | auto-labelling | JSON `bbox_2d`+`class` | single image | 0–1000 |
+| `nuscenes_lane` | auto-labelling | JSON `{lane_id,points}` | single image | 0–1000 |
+| `nuscenes_scene_graph` | auto-labelling | JSON `(s,r,o)` triples | single image | — |
+| `nuscenes_drivable_area` | auto-labelling | JSON `{polygon:[...]}` | single image | 0–1000 |
 
 ## Coordinate conventions
 
@@ -54,7 +58,42 @@ single most common source of bugs when porting them:
 
 `skill_parsers.coord_scale(key)` returns 0 / 999 / 1000 so renderers apply the
 right divisor. The CLI grounding renderer (`run_skill._draw_grounding`) honors
-this automatically.
+this automatically. `SkillSpec.is_spatial` flags any pixel-carrying output
+(grounding, lanes, drivable polygon) and the CLI `_draw_spatial` helper renders
+them — boxes/points via the shared helper, lanes as colored polylines, the
+drivable polygon as a translucent green overlay.
+
+## Auto-labelling skills (weak annotator for driving scenes)
+
+The four `nuscenes_*` skills are **not** cookbook reproductions: they turn the
+2B Thinking FP8 model into a weak annotator that emits structured
+pseudo-labels for nuScenes-style driving frames. Use them to bootstrap a
+label set that you then verify/refine, not as ground truth.
+
+```bash
+qwen3-vl skill --skill nuscenes_2d_detection --model 2b --image frame.jpg
+qwen3-vl skill --skill nuscenes_lane           --model 2b --image frame.jpg
+qwen3-vl skill --skill nuscenes_scene_graph    --model 2b --image frame.jpg
+qwen3-vl skill --skill nuscenes_drivable_area  --model 2b --image frame.jpg
+```
+
+Class vocabularies (fixed in the prompt so labels are stable across frames):
+
+* **2D detection** — `vehicle`, `pedestrian`, `cyclist`, `traffic_sign`,
+  `traffic_light`, `barrier`, `cone` (bbox_2d in 0–1000).
+* **Scene graph** — relations: `left_of`, `right_of`, `ahead_of`, `behind`,
+  `on`, `next_to`, `crossing`, `same_lane_as`, `parked`.
+* **Lane** — one `lane_id` per visible lane, points ordered bottom→top.
+* **Drivable area** — a single closed polygon over the road in front of the
+  ego vehicle.
+
+**Tolerant parsing.** The 2B Thinking model narrates before answering, so the
+parsers in `skill_parsers.py` (`parse_lane`, `parse_scene_graph`,
+`parse_drivable_area`) first try a strict JSON block and then fall back to
+recovering coordinates / triples mentioned inline in prose — e.g.
+`[65, 245, 345, 675] - truck`, `lane 0: [[100, 900], ...]`,
+`(truck, left_of, van)`. Anything returned is already in the [0,1000] frame;
+the CLI rescales to absolute pixels before drawing.
 
 ## Notes on cookbook differences
 
