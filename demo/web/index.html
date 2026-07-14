@@ -2659,7 +2659,6 @@
           wrapper.append(grid);
           // Attach the final answer text so we can draw grounding boxes on the history visuals too.
           if (content) wrapper.dataset.answerText = content;
-          if (task && (task.key === 'grounding_2d' || task.key === 'grounding_3d')) wrapper.dataset.isGrounding = 'true';
         } else {
           wrapper.append(node("div", "message-body", content));
           const media = mediaForMessage(session, message, index);
