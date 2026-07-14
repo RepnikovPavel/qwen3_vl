@@ -35,21 +35,25 @@ def _chart(values_key="values"):
 class DemoPresetTest(unittest.TestCase):
     def test_registry_is_ordered_immutable_and_has_task_specific_defaults(self):
         keys = list(DEMO_PRESETS)
+        # Grounding presets are first (special cased, prompt=None + accepts_custom)
+        self.assertEqual(keys[0], "grounding_2d")
+        self.assertEqual(keys[1], "grounding_3d")
         self.assertIn("describe", keys)
         self.assertIn("video_understanding", keys)
         self.assertIn("document_parsing", keys)
         self.assertIn("spatial_understanding", keys)
         self.assertIn("think_detailed", keys)
-        self.assertEqual(keys[0], "describe")
         self.assertEqual(keys[-1], "think_detailed")  # last added
-        self.assertEqual(get_preset("describe").default_max_image_side, 640)
-        self.assertEqual(get_preset("ocr").default_max_image_side, 1280)
         self.assertEqual(get_preset("describe").default_max_image_side, 640)
         self.assertEqual(get_preset("ocr").default_max_image_side, 1280)
         self.assertEqual(get_preset("formula").default_max_new_tokens, 4096)
         self.assertEqual(get_preset("chart").default_max_new_tokens, 16_384)
         self.assertTrue(get_preset("formula").structured_output)
         self.assertFalse(get_preset("ocr").structured_output)
+        # Grounding are text but specially handled
+        self.assertFalse(get_preset("grounding_2d").structured_output)
+        self.assertTrue(get_preset("grounding_2d").accepts_custom_prompt)
+        self.assertIsNone(get_preset("grounding_2d").prompt)
         with self.assertRaises(FrozenInstanceError):
             get_preset("ocr").label = "changed"
         with self.assertRaises(TypeError):
@@ -62,14 +66,16 @@ class DemoPresetTest(unittest.TestCase):
         self.assertEqual(first["schema_version"], 1)
         self.assertGreaterEqual(len(first["tasks"]), 5)
         self.assertIn("video_understanding", [t["key"] for t in first["tasks"]])
+        self.assertIn("grounding_2d", [t["key"] for t in first["tasks"]])
         self.assertNotIn("ground_truth", rendered)
         self.assertNotIn("image_sha256", rendered)
-        # custom (or any accepts_custom) has null prompt
+        # custom + grounding have null prompt + accepts_custom
         custom_task = next((t for t in first["tasks"] if t.get("accepts_custom_prompt")), None)
         self.assertIsNotNone(custom_task)
         self.assertIsNone(custom_task["prompt"])
+        # mutation should not affect the immutable registry
         first["tasks"][0]["label"] = "mutated"
-        self.assertEqual(public_presets()["tasks"][0]["label"], "Describe")
+        self.assertNotEqual(public_presets()["tasks"][0]["label"], "mutated")
 
     def test_invalid_preset_construction_is_rejected(self):
         cases = [
@@ -118,11 +124,11 @@ class TaskResolutionTest(unittest.TestCase):
         invalid_calls = [
             lambda: get_preset("OCR"),
             lambda: get_preset("missing"),
-            lambda: resolve_task("custom"),
-            lambda: resolve_task("ocr", custom_prompt="override"),
+            lambda: resolve_task("custom"),  # missing required custom_prompt
+            # Note: resolve_task("ocr", custom_prompt=...) is now ALLOWED (free override for all)
             lambda: resolve_task("describe", max_new_tokens=True),
             lambda: resolve_task("describe", max_new_tokens=0),
-            lambda: resolve_task("describe", max_new_tokens=40_961),
+            lambda: resolve_task("describe", max_new_tokens=200_000),  # > MAX_NEW_TOKENS=131072
             lambda: resolve_task("describe", max_image_side=63),
             lambda: resolve_task("describe", max_image_side=4097),
             lambda: resolve_task("custom", custom_prompt="x" * 200_001),
@@ -130,6 +136,30 @@ class TaskResolutionTest(unittest.TestCase):
         for call in invalid_calls:
             with self.subTest(call=call), self.assertRaises(DemoTaskError):
                 call()
+
+    def test_every_skill_preset_resolves_correctly(self):
+        """Ensure there is a working test path for *every* registered skill/preset.
+        This covers grounding (special), custom, structured, and all others.
+        """
+        for key in DEMO_PRESETS:
+            preset = get_preset(key)
+            if preset.accepts_custom_prompt:
+                # grounding_2d, grounding_3d, custom require non-empty custom_prompt
+                res = resolve_task(key, custom_prompt=f"test instruction for {key} skill")
+            else:
+                res = resolve_task(key)
+            self.assertEqual(res["task"], key)
+            self.assertEqual(res["label"], preset.label)
+            self.assertIn("prompt", res)
+            self.assertGreater(res["max_new_tokens"], 0)
+            self.assertGreater(res["max_image_side"], 0)
+            # grounding and custom are always text (viz or free-form)
+            if key in ("grounding_2d", "grounding_3d", "custom"):
+                self.assertEqual(res["output_kind"], "text")
+                self.assertFalse(res.get("structured_output", False))
+            # structured ones
+            if key in ("formula", "chart"):
+                self.assertTrue(res.get("structured_output"))
 
 
 class StructuredResultTest(unittest.TestCase):
