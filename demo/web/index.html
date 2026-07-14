@@ -69,8 +69,8 @@
   .status.err .dot { background: var(--err); }
   @keyframes pulse { 50% { opacity: .4; } }
 
-  .panes { flex: 1; display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; }
-  .pane { display: flex; flex-direction: column; overflow: hidden; }
+  .panes { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1.3fr; overflow: hidden; }
+  .pane { display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
   .pane + .pane { border-left: 1px solid var(--border); }
   .pane-head { padding: 8px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border-bottom: 1px solid var(--border); background: var(--panel); display: flex; align-items: center; }
   .pane-head .pill { margin-left: auto; font-size: 10px; background: var(--panel2); padding: 1px 6px; border-radius: 10px; color: var(--muted); }
@@ -85,12 +85,29 @@
   .viz img { max-width: 100%; border-radius: 6px; border: 1px solid var(--border); }
   .viz:empty { display: none; }
 
+  /* image viewer with overlays */
+  .draw-btn {
+    margin-left: auto; margin-right: 6px; font-size: 11px; font: inherit; cursor: pointer;
+    background: var(--accent); color: #fff; border: none; border-radius: 5px; padding: 3px 9px;
+    text-transform: none; letter-spacing: 0;
+  }
+  .draw-btn:hover:not(:disabled) { background: var(--accent2); }
+  .draw-btn:disabled { background: var(--border); cursor: not-allowed; opacity: .6; }
+  .draw-btn.active { background: var(--ok); }
+  .viewer-body { flex: 1; position: relative; overflow: hidden; background: #050608; cursor: grab; }
+  .viewer-body.grabbing { cursor: grabbing; }
+  .viewer-body img { position: absolute; top: 0; left: 0; max-width: none; max-height: none; transform-origin: 0 0; user-select: none; pointer-events: none; }
+  #overlayCanvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; pointer-events: none; z-index: 2; }
+  .viewer-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-style: italic; pointer-events: none; }
+  .viewer-empty:empty { display: none; }
+  .viewer-hint { padding: 4px 12px; font-size: 10px; color: var(--muted); border-top: 1px solid var(--border); background: var(--panel); text-align: center; }
+
   .empty-hero { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); text-align: center; flex-direction: column; gap: 8px; }
   .empty-hero .emo { font-size: 40px; opacity: .5; }
 
   @media (max-width: 900px) {
     .wrap { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; min-height: 100vh; }
-    .panes { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+    .panes { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr 1.4fr; }
     .pane + .pane { border-left: none; border-top: 1px solid var(--border); }
   }
 </style>
@@ -150,6 +167,19 @@
       <div class="pane">
         <div class="pane-head">Answer <span class="pill" id="answerPill"></span></div>
         <div class="pane-body" id="answer" data-placeholder="Final answer appears here."></div>
+      </div>
+      <div class="pane viewer">
+        <div class="pane-head">
+          Image
+          <span class="pill" id="zoomPill"></span>
+          <button class="draw-btn" id="drawBtn" type="button" disabled>Draw overlays</button>
+        </div>
+        <div class="viewer-body" id="viewerBody">
+          <canvas id="overlayCanvas"></canvas>
+          <img id="viewerImg" alt="" draggable="false">
+          <div class="viewer-empty" id="viewerEmpty">Load an image to view it here at full resolution.</div>
+        </div>
+        <div class="viewer-hint">scroll = zoom &middot; drag = pan &middot; double-click = reset</div>
       </div>
     </div>
     <div class="empty-hero" id="hero">
@@ -212,6 +242,143 @@ function renderPreviews() {
     x.onclick = (e) => { e.stopPropagation(); URL.revokeObjectURL(item.url); state.files.splice(i,1); renderPreviews(); };
     d.append(img, x); box.append(d);
   });
+  // Load the first image into the high-res viewer.
+  const first = state.files.find(f => f.file.type.startsWith("image/"));
+  if (first) loadViewer(first.url);
+  else clearViewer();
+}
+
+// ---- high-res image viewer with zoom/pan + overlays ----
+const viewer = {
+  img: $("viewerImg"), canvas: $("overlayCanvas"), ctx: null,
+  body: $("viewerBody"), empty: $("viewerEmpty"),
+  zoom: 1, x: 0, y: 0, dragging: false, lastX: 0, lastY: 0,
+  naturalW: 0, naturalH: 0,
+};
+viewer.ctx = viewer.canvas.getContext("2d");
+state.overlays = null;
+
+function loadViewer(src) {
+  const img = viewer.img;
+  img.onload = () => {
+    viewer.naturalW = img.naturalWidth; viewer.naturalH = img.naturalHeight;
+    viewer.canvas.width = viewer.naturalW; viewer.canvas.height = viewer.naturalH;
+    viewer.empty.style.display = "none";
+    fitViewer();
+    drawOverlays();
+  };
+  img.src = src;
+  state.overlays = null;
+  $("drawBtn").disabled = true;
+  $("drawBtn").classList.remove("active");
+}
+function clearViewer() {
+  viewer.img.removeAttribute("src");
+  viewer.ctx && viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
+  viewer.empty.style.display = "";
+  $("zoomPill").textContent = "";
+  $("drawBtn").disabled = true;
+}
+
+function fitViewer() {
+  const bw = viewer.body.clientWidth, bh = viewer.body.clientHeight;
+  const iw = viewer.naturalW, ih = viewer.naturalH;
+  if (!iw || !ih) return;
+  viewer.zoom = Math.min(bw / iw, bh / ih, 1);
+  viewer.x = Math.max(0, (bw - iw * viewer.zoom) / 2);
+  viewer.y = Math.max(0, (bh - ih * viewer.zoom) / 2);
+  applyTransform();
+}
+function applyTransform() {
+  const t = `translate(${viewer.x}px,${viewer.y}px) scale(${viewer.zoom})`;
+  viewer.img.style.transform = t;
+  viewer.canvas.style.transform = t;
+  $("zoomPill").textContent = Math.round(viewer.zoom * 100) + "%";
+  drawOverlays();
+}
+
+// wheel zoom around cursor
+viewer.body.addEventListener("wheel", e => {
+  e.preventDefault();
+  if (!viewer.naturalW) return;
+  const rect = viewer.body.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const oldZoom = viewer.zoom;
+  const factor = e.deltaY < 0 ? 1.15 : 1/1.15;
+  const newZoom = Math.max(0.05, Math.min(40, viewer.zoom * factor));
+  // keep cursor point fixed: image point under cursor stays under cursor
+  viewer.x = mx - (mx - viewer.x) * (newZoom / oldZoom);
+  viewer.y = my - (my - viewer.y) * (newZoom / oldZoom);
+  viewer.zoom = newZoom;
+  applyTransform();
+}, { passive: false });
+
+// drag pan
+viewer.body.addEventListener("mousedown", e => {
+  if (!viewer.naturalW) return;
+  viewer.dragging = true; viewer.lastX = e.clientX; viewer.lastY = e.clientY;
+  viewer.body.classList.add("grabbing");
+});
+window.addEventListener("mousemove", e => {
+  if (!viewer.dragging) return;
+  viewer.x += e.clientX - viewer.lastX; viewer.y += e.clientY - viewer.lastY;
+  viewer.lastX = e.clientX; viewer.lastY = e.clientY;
+  applyTransform();
+});
+window.addEventListener("mouseup", () => { viewer.dragging = false; viewer.body.classList.remove("grabbing"); });
+viewer.body.addEventListener("dblclick", fitViewer);
+
+// ---- Draw overlays button ----
+$("drawBtn").addEventListener("click", () => {
+  const btn = $("drawBtn");
+  if (btn.classList.contains("active")) {
+    // toggle off: clear canvas
+    viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
+    btn.classList.remove("active");
+  } else {
+    drawOverlays(true);
+    btn.classList.add("active");
+  }
+});
+
+const OVERLAY_COLORS = ["#ff5d5d","#5dff8a","#5dc8ff","#ffd95d","#c25dff","#5dffe1","#ffa55d","#ff5dc4"];
+function drawOverlays(force) {
+  if (!viewer.ctx || !viewer.naturalW) return;
+  viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
+  if (!$("drawBtn").classList.contains("active") && !force) return;
+  const ov = state.overlays;
+  if (!ov || !ov.length) return;
+  const W = viewer.naturalW, H = viewer.naturalH;
+  viewer.ctx.lineWidth = Math.max(2, Math.round(W * 0.003));
+  viewer.ctx.font = Math.round(W * 0.018) + "px sans-serif";
+  viewer.ctx.textBaseline = "top";
+  ov.forEach((item, i) => {
+    const color = OVERLAY_COLORS[i % OVERLAY_COLORS.length];
+    const pts = item.pts.map(p => [p[0] * W, p[1] * H]);
+    viewer.ctx.strokeStyle = color; viewer.ctx.fillStyle = color;
+    if (item.kind === "box" && pts.length >= 2) {
+      const [x1,y1] = pts[0], [x2,y2] = pts[1];
+      viewer.ctx.strokeRect(Math.min(x1,x2), Math.min(y1,y2), Math.abs(x2-x1), Math.abs(y2-y1));
+    } else if (item.kind === "point" && pts.length >= 1) {
+      const [x,y] = pts[0]; const r = Math.round(W * 0.008);
+      viewer.ctx.beginPath(); viewer.ctx.arc(x, y, r, 0, 2*Math.PI); viewer.ctx.fill();
+    } else if (item.kind === "poly" && pts.length >= 2) {
+      viewer.ctx.beginPath();
+      viewer.ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let k = 1; k < pts.length; k++) viewer.ctx.lineTo(pts[k][0], pts[k][1]);
+      // draw all edges of the 3D wireframe (8 corners): connect each pair once
+      const EDGES3D = [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
+      viewer.ctx.stroke();
+      viewer.ctx.beginPath();
+      EDGES3D.forEach(([a,b]) => { if (pts[a] && pts[b]) { viewer.ctx.moveTo(pts[a][0],pts[a][1]); viewer.ctx.lineTo(pts[b][0],pts[b][1]); } });
+      viewer.ctx.stroke();
+    }
+    // label
+    if (item.label) {
+      const [lx, ly] = pts[0];
+      viewer.ctx.fillText(item.label, lx + 4, ly + 2);
+    }
+  });
 }
 
 $("send").addEventListener("click", () => state.generating ? stopGen() : startGen());
@@ -227,6 +394,12 @@ async function startGen() {
   $("reasoning").textContent = ""; $("answer").textContent = "";
   $("reasonPill").textContent = ""; $("answerPill").textContent = "";
   $("viz").innerHTML = ""; $("hero").style.display = "none";
+  // reset overlays / draw button for the new generation
+  state.overlays = null;
+  $("drawBtn").disabled = true;
+  $("drawBtn").classList.remove("active");
+  $("drawBtn").textContent = "Draw overlays";
+  viewer.ctx && viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
   setGen(true); setStatus("live", "loading model…");
 
   const form = new FormData();
@@ -234,6 +407,7 @@ async function startGen() {
   form.append("model_id", modelId);
   form.append("placement", "single");
   form.append("task", task);
+  form.append("skill", $("skill").value || "");
   form.append("custom_prompt", prompt || "");
   form.append("max_new_tokens", $("maxTokens").value);
   form.append("max_image_side", $("imageSide").value);
@@ -300,6 +474,18 @@ function handle(ev) {
       $("answerPill").textContent = r.tokens_per_second ? `${r.tokens_per_second.toFixed(1)} tok/s` : "";
       setStatus("idle", `${r.finish_reason || "done"} · ${r.generated_tokens || 0} tok`);
       if (ev.structured && ev.structured.value) showStructured(ev.structured);
+      // overlays from coordinate skills → enable the Draw button
+      const ov = ev.structured && ev.structured.overlays;
+      if (Array.isArray(ov) && ov.length) {
+        state.overlays = ov;
+        $("drawBtn").disabled = false;
+        $("drawBtn").classList.remove("active");
+        $("drawBtn").textContent = `Draw overlays (${ov.length})`;
+      } else {
+        state.overlays = null;
+        $("drawBtn").disabled = true;
+        $("drawBtn").textContent = "Draw overlays";
+      }
       break;
     }
     case "error":

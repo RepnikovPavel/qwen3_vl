@@ -440,6 +440,108 @@ async def _save_uploads(
         raise
 
 
+_COORD_SKILLS = {
+    "2d_grounding", "3d_grounding", "spatial_understanding",
+    "omni_recognition", "ocr_spotting", "computer_use", "mobile_agent",
+}
+
+
+def _build_skill_overlays(
+    skill_key: str,
+    answer: str,
+    session_id: str,
+    store: SessionStore,
+    media_root: Path,
+) -> tuple[list[dict[str, Any]] | None, dict[str, int] | None]:
+    """Parse a coordinate skill answer into normalized (0..1) overlays.
+
+    Returns (overlays, image_size). overlays items:
+      {"kind": "box"|"point"|"poly", "pts": [[x,y],...], "label": "...", "extra": {...}}
+    All coords normalized to 0..1 relative to the ORIGINAL image, so the client
+    can draw them at any zoom level. For 3D, bbox_3d is projected via camera
+    intrinsics (fov=60 fallback, like the cookbook) then normalized.
+    """
+    from skills import SKILLS
+    from skill_parsers import parse_skill
+
+    if skill_key not in _COORD_SKILLS:
+        return None, None
+    spec = SKILLS[skill_key]
+    scale = spec.coord_scale or 1000
+    try:
+        parsed = parse_skill(skill_key, answer)
+    except Exception:
+        parsed = []
+    if not isinstance(parsed, list) or not parsed:
+        return None, None
+
+    # Find the original image + its size from the session's first media item.
+    session = store.get_session(session_id)
+    image_size: dict[str, int] | None = None
+    orig_path: Path | None = None
+    if session and session.get("media"):
+        first_id = session["media"][0].get("id")
+        if first_id:
+            item = store.get_media(first_id, include_stored_path=True)
+            if item and item.get("media_type") == "image" and item.get("metadata"):
+                md = item["metadata"]
+                if isinstance(md, dict) and "width" in md and "height" in md:
+                    image_size = {"width": int(md["width"]), "height": int(md["height"])}
+                    orig_path = Path(item["stored_path"])
+    if image_size is None:
+        return None, None
+    w, h = image_size["width"], image_size["height"]
+
+    overlays: list[dict[str, Any]] = []
+
+    if skill_key == "3d_grounding":
+        # Project 3D boxes to 2D corners, then normalize.
+        from PIL import Image as _PILImage
+        from demo.grounding_3d_viz import generate_camera_params, convert_3dbbox
+        try:
+            if orig_path is not None:
+                cam = generate_camera_params(_PILImage.open(orig_path).convert("RGB"), fov=60.0)
+            else:
+                cam = {"fx": w / 2, "fy": h / 2, "cx": w / 2, "cy": h / 2}
+        except Exception:
+            cam = {"fx": w / 2, "fy": h / 2, "cx": w / 2, "cy": h / 2}
+        for item in parsed:
+            bbox_3d = item.get("bbox_3d")
+            if not bbox_3d or len(bbox_3d) < 9:
+                continue
+            corners = convert_3dbbox(list(bbox_3d), cam)
+            if len(corners) < 8:
+                continue
+            poly = [[c[0] / w, c[1] / h] for c in corners]
+            overlays.append({
+                "kind": "poly", "pts": poly,
+                "label": item.get("label", ""),
+                "extra": {"bbox_3d": list(bbox_3d)},
+            })
+        return overlays, image_size
+
+    # 2D / point skills: bbox_2d [x1,y1,x2,y2] or point_2d [x,y], scale 0..N.
+    for item in parsed:
+        label = item.get("label") or item.get("name") or item.get("text_content") or ""
+        extra = {k: v for k, v in item.items()
+                 if k not in {"bbox_2d", "point_2d", "label", "name", "text_content"}}
+        if "bbox_2d" in item and len(item["bbox_2d"]) >= 4:
+            x1, y1, x2, y2 = item["bbox_2d"][:4]
+            overlays.append({
+                "kind": "box",
+                "pts": [[x1 / scale, y1 / scale], [x2 / scale, y2 / scale]],
+                "label": str(label), "extra": extra,
+            })
+        elif "point_2d" in item and len(item["point_2d"]) >= 2:
+            x, y = item["point_2d"][:2]
+            overlays.append({
+                "kind": "point",
+                "pts": [[x / scale, y / scale]],
+                "label": str(label), "extra": extra,
+            })
+    return overlays, image_size
+
+
 def create_app(
     manager: DemoModelManager,
     store: SessionStore,
@@ -906,11 +1008,12 @@ def create_app(
         model_id: str = Form(...),
         placement: str = Form("single"),
         task: str = Form("describe"),
+        skill: str | None = Form(None),
         custom_prompt: str | None = Form(None),
         max_new_tokens: int | None = Form(None),
         max_image_side: int | None = Form(None),
         do_sample: bool = Form(True),
-        temperature: float = Form(0.6),
+        temperature: float = 0.6,
         top_p: float = Form(0.95),
         top_k: int = Form(20),
         video_num_frames: int = Form(32),
@@ -1071,6 +1174,18 @@ def create_app(
                     structured = build_structured_result(
                         resolved["task"], final_answer
                     )
+                    # For coordinate-bearing skills, parse model output into
+                    # normalized overlays (0..1) the client can draw on a canvas.
+                    overlays = None
+                    image_size = None
+                    if skill and final_answer:
+                        overlays, image_size = _build_skill_overlays(
+                            skill, final_answer, session_id, store, media_root
+                        )
+                    if overlays is not None:
+                        structured = dict(structured) if structured else {}
+                        structured["overlays"] = overlays
+                        structured["image_size"] = image_size
                     assistant_content = final_answer
                     if not assistant_content and not final_reasoning:
                         assistant_content = (
