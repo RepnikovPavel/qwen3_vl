@@ -47,7 +47,11 @@ class SkillSpec:
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[a-z0-9][a-z0-9_]*", self.key):
             raise SkillError("skill key must match [a-z0-9][a-z0-9_]*")
-        if self.output_kind not in {"text", "formula", "chart", "grounding_2d", "grounding_3d", "code"}:
+        if self.output_kind not in {
+            "text", "formula", "chart", "grounding_2d", "grounding_3d", "code",
+            # Auto-labelling output kinds (structured JSON produced on demand):
+            "lane", "scene_graph", "drivable_area",
+        }:
             raise SkillError(f"unsupported output_kind: {self.output_kind!r}")
         if self.frames_kind not in {"single_image", "multi_image", "video", "document"}:
             raise SkillError(f"unsupported frames_kind: {self.frames_kind!r}")
@@ -59,6 +63,18 @@ class SkillSpec:
     @property
     def is_grounding(self) -> bool:
         return self.output_kind in {"grounding_2d", "grounding_3d"}
+
+    @property
+    def is_spatial(self) -> bool:
+        """True for any skill whose output carries pixel-space coordinates.
+
+        Grounding (bbox/point), lane polylines and drivable-area polygons all
+        carry [0,coord_scale] coordinates that the CLI / benchmark must scale
+        back to absolute pixels before drawing or evaluation.
+        """
+        return self.output_kind in {
+            "grounding_2d", "grounding_3d", "lane", "drivable_area",
+        }
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -342,6 +358,107 @@ MOBILE_AGENT = SkillSpec(
 )
 
 
+# --- Auto-labelling skills (driving / nuScenes-style scenes) ------------------
+#
+# These are not cookbook reproductions: they turn the Thinking model into a
+# weak annotator that emits structured pseudo-labels (2D boxes, lane polylines,
+# a scene graph, a drivable polygon) in the [0,1000] image coordinate frame.
+# The prompts ask for compact JSON after a short reasoning, but the parsers in
+# skill_parsers.py are tolerant and also recover coordinates mentioned inline
+# in prose, because the 2B Thinking model frequently narrates before answering.
+
+NUSCENES_2D_DETECTION = SkillSpec(
+    key="nuscenes_2d_detection",
+    label="nuScenes 2D detection (auto-label)",
+    cookbook="auto-labelling (2d_grounding + nuScenes categories)",
+    prompt=(
+        "Detect every traffic-relevant object in this driving image. "
+        "Allowed classes: vehicle, pedestrian, cyclist, traffic_sign, "
+        "traffic_light, barrier, cone. "
+        'Output a JSON array, each item {"class": "...", "bbox_2d": '
+        "[x1, y1, x2, y2]} with integer coordinates in [0, 1000] relative to "
+        "image width/height (x grows right, y grows down). Keep reasoning "
+        "short. Begin the final answer with [ and end with ]."
+    ),
+    output_kind="grounding_2d",
+    frames_kind="single_image",
+    coord_scale=1000,
+    default_max_new_tokens=4096,
+    notes=(
+        "Weak annotator for 2D detection. Parser recovers bbox_2d from strict "
+        "JSON or from inline '[x1, y1, x2, y2] - class' prose."
+    ),
+)
+
+NUSCENES_LANE = SkillSpec(
+    key="nuscenes_lane",
+    label="nuScenes lane polyline (auto-label)",
+    cookbook="auto-labelling (lane perception)",
+    prompt=(
+        "Trace every visible road lane marking as an ordered polyline. "
+        'Output a JSON array, each item {"lane_id": 0, "points": '
+        "[[x, y], ...]} with integer coordinates in [0, 1000] relative to "
+        "image width/height, ordered from the bottom of the image (nearest) "
+        "to the top (farthest). Use one lane_id per visible lane (ego lane, "
+        "left neighbour, right neighbour, ...). Keep reasoning short. Begin "
+        "the final answer with [ and end with ]."
+    ),
+    output_kind="lane",
+    frames_kind="single_image",
+    coord_scale=1000,
+    default_max_new_tokens=4096,
+    notes=(
+        "Weak annotator for lane perception; points are scaled [0,1000]. "
+        "Parser recovers lane_id + points from JSON or inline 'lane N: ...'."
+    ),
+)
+
+NUSCENES_SCENE_GRAPH = SkillSpec(
+    key="nuscenes_scene_graph",
+    label="nuScenes scene graph (auto-label)",
+    cookbook="auto-labelling (scene understanding)",
+    prompt=(
+        "Build a scene graph for this driving image. Nodes are the main "
+        "objects (vehicles, pedestrians, lanes, signs, barriers, road parts). "
+        'Output a JSON array of triples {"subject": "...", "relation": "...", '
+        '"object": "..."} with relations drawn from: left_of, right_of, '
+        "ahead_of, behind, on, next_to, crossing, same_lane_as, parked. "
+        "Keep reasoning short. Begin the final answer with [ and end with ]."
+    ),
+    output_kind="scene_graph",
+    frames_kind="single_image",
+    coord_scale=0,
+    default_max_new_tokens=4096,
+    notes=(
+        "Weak annotator for scene understanding; no pixel coordinates. "
+        "Parser recovers subject/relation/object triples from JSON or prose."
+    ),
+)
+
+NUSCENES_DRIVABLE_AREA = SkillSpec(
+    key="nuscenes_drivable_area",
+    label="nuScenes drivable area polygon (auto-label)",
+    cookbook="auto-labelling (drivable-area segmentation)",
+    prompt=(
+        "Outline the drivable road surface in front of the ego vehicle as a "
+        "single closed polygon. "
+        'Output a JSON object {"polygon": [[x, y], ...]} with integer '
+        "coordinates in [0, 1000] relative to image width/height, ordered "
+        "clockwise and covering both the near and far road. Exclude sidewalks, "
+        "barriers and other vehicles. Keep reasoning short. Begin the final "
+        'answer with { and end with }.'
+    ),
+    output_kind="drivable_area",
+    frames_kind="single_image",
+    coord_scale=1000,
+    default_max_new_tokens=4096,
+    notes=(
+        "Weak annotator for drivable-area segmentation; polygon scaled "
+        "[0,1000]. Parser recovers the polygon from JSON or inline point list."
+    ),
+)
+
+
 _SKILL_ITEMS = (
     DESCRIBE,
     OCR,
@@ -360,6 +477,11 @@ _SKILL_ITEMS = (
     MMCODE,
     COMPUTER_USE,
     MOBILE_AGENT,
+    # Auto-labelling skills (driving / nuScenes-style):
+    NUSCENES_2D_DETECTION,
+    NUSCENES_LANE,
+    NUSCENES_SCENE_GRAPH,
+    NUSCENES_DRIVABLE_AREA,
 )
 
 SKILLS: Mapping[str, SkillSpec] = MappingProxyType({item.key: item for item in _SKILL_ITEMS})

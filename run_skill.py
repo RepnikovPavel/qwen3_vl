@@ -58,6 +58,66 @@ def _draw_grounding(image_path: str, parsed: list[dict[str, Any]], scale: int, o
     return str(out_path)
 
 
+def _draw_spatial(
+    image_path: str,
+    parsed: Any,
+    skill: Any,
+    scale: int,
+    out_path: Path,
+) -> str:
+    """Render any spatial auto-labelling output (boxes/points/lanes/polygon)."""
+    from PIL import Image
+    from demo.grounding_viz import COLORS, _FONT
+    from PIL import ImageDraw
+
+    image = Image.open(image_path).convert("RGB")
+    canvas = image.copy()
+    draw = ImageDraw.Draw(canvas)
+    width, height = canvas.size
+    kind = skill.output_kind
+
+    if kind in {"grounding_2d", "grounding_3d"} and isinstance(parsed, list):
+        # Delegate bbox/point drawing to the shared helper.
+        canvas.save(out_path)
+        return _draw_grounding(image_path, parsed, scale, out_path)
+
+    if kind == "lane" and isinstance(parsed, list):
+        for index, lane in enumerate(parsed):
+            if not isinstance(lane, dict):
+                continue
+            points = lane.get("points") or []
+            color = COLORS[index % len(COLORS)]
+            abs_pts = [
+                (int(p[0] / scale * width), int(p[1] / scale * height))
+                for p in points
+                if isinstance(p, (list, tuple)) and len(p) >= 2
+            ]
+            if len(abs_pts) >= 2:
+                draw.line(abs_pts, fill=color, width=4, joint="curve")
+            for x, y in abs_pts:
+                draw.ellipse([(x - 3, y - 3), (x + 3, y + 3)], fill=color)
+            label = f"lane {lane.get('lane_id', index)}"
+            draw.text((abs_pts[0][0] + 6, abs_pts[0][1]), label, fill=color, font=_FONT)
+
+    elif kind == "drivable_area" and isinstance(parsed, dict):
+        polygon = parsed.get("polygon") or []
+        abs_pts = [
+            (int(p[0] / scale * width), int(p[1] / scale * height))
+            for p in polygon
+            if isinstance(p, (list, tuple)) and len(p) >= 2
+        ]
+        if len(abs_pts) >= 3:
+            fill = (76, 175, 80, 96)  # translucent green
+            # Overlay needs an RGBA canvas; paste back onto the RGB image.
+            overlay = image.copy().convert("RGBA")
+            ImageDraw.Draw(overlay).polygon(abs_pts, fill=fill, outline=(76, 175, 80))
+            canvas = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+            ImageDraw.Draw(canvas).line(abs_pts + [abs_pts[0]], fill=(76, 175, 80), width=3)
+
+    canvas.save(out_path)
+    return str(out_path)
+
+
 def run_skill(args) -> dict[str, Any]:
     skill = get_skill(args.skill)
     resolved = resolve_skill(
@@ -95,13 +155,18 @@ def run_skill(args) -> dict[str, Any]:
         check_finite_logits=False,
     )
     scale = coord_scale(args.skill)
-    parsed = parse_skill(args.skill, result.answer) if scale or skill.output_kind in {"formula", "chart"} else None
+    structured_kinds = {"formula", "chart", "lane", "scene_graph", "drivable_area"}
+    parsed = (
+        parse_skill(args.skill, result.answer)
+        if scale or skill.output_kind in structured_kinds
+        else None
+    )
     annotated_path: str | None = None
-    if skill.is_grounding and isinstance(parsed, list) and parsed and args.image:
+    if skill.is_spatial and args.image and parsed:
         out_dir = Path(args.output_dir).expanduser() if args.output_dir else Path(args.image).parent
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"{Path(args.image).stem}_{args.skill}_annotated.png"
-        annotated_path = _draw_grounding(args.image, parsed, scale or 1000, out_path)
+        annotated_path = _draw_spatial(args.image, parsed, skill, scale or 1000, out_path)
     return {
         "skill": resolved,
         "model": runtime.spec.repo_id,

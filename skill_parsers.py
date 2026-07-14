@@ -116,6 +116,206 @@ def parse_plain(text: str) -> str:
     return text.strip()
 
 
+# --- Auto-labelling parsers (tolerant JSON + inline-prose recovery) ----------
+#
+# The 2B Thinking model frequently narrates its reasoning before answering, so
+# these parsers first try a strict JSON block and then fall back to extracting
+# coordinate lists / triples mentioned inline in prose. Anything returned is
+# already in the skill's [0,coord_scale] frame; the CLI rescales to pixels.
+
+_COORD_LIST = re.compile(
+    r"\[\s*(-?\d+)\s*,\s*(-?\d+)\s*(?:,\s*(-?\d+)\s*,\s*(-?\d+)\s*)?\]"
+)
+
+
+def _extract_json_block(text: str) -> Any:
+    """Return the first JSON array/object decoded from text, or None.
+
+    Strips markdown fences and narrows the text to the largest balanced
+    [..] / {..} span before decoding, so prose around the JSON is ignored.
+    """
+    cleaned = _strip_fences(text)
+    if not cleaned:
+        return None
+    # Try the whole stripped text first (common when the model obeys "JSON only").
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+    # Fall back to the largest balanced bracket span.
+    start = min((cleaned.find("["), cleaned.find("{")))
+    if start != -1:
+        end = max(cleaned.rfind("]"), cleaned.rfind("}"))
+        if end > start:
+            candidate = cleaned[start : end + 1]
+            try:
+                return json.loads(candidate)
+            except Exception:
+                pass
+    return None
+
+
+def parse_lane(text: str) -> list[dict[str, Any]]:
+    """Lane polylines (coord scale 0..1000). Tolerant of prose.
+
+    Returns a list of ``{"lane_id": int, "points": [[x, y], ...]}`` dicts.
+    Recovers from strict JSON, from 'lane N: ...' prose, and finally from any
+    bare coordinate pairs found in the text (collapsed into one lane).
+    """
+    if not text:
+        return []
+    data = _extract_json_block(text)
+    lanes: list[dict[str, Any]] = []
+    if isinstance(data, list):
+        for index, item in enumerate(data):
+            if not isinstance(item, dict):
+                continue
+            raw_points = item.get("points")
+            if raw_points is None:
+                # Some models emit {"lane_id": 0, "x": [...], "y": [...]}.
+                xs = item.get("x") or item.get("xs") or []
+                ys = item.get("y") or item.get("ys") or []
+                if isinstance(xs, list) and isinstance(ys, list):
+                    raw_points = list(zip(xs, ys))
+            if not isinstance(raw_points, list):
+                continue
+            points = [_coord_pair(p) for p in raw_points]
+            points = [p for p in points if p is not None]
+            if points:
+                lanes.append({
+                    "lane_id": item.get("lane_id", index),
+                    "points": points,
+                })
+    if lanes:
+        return lanes
+    # Prose fallback: 'lane 0: (x,y) (x,y)' or 'lane 0:' followed by coords.
+    for match in re.finditer(
+        r"lane\s*(\d+)\s*[:\-]([^\n]*(?:\n(?!\s*lane\s*\d)[^\n]*)*)",
+        text, flags=re.IGNORECASE,
+    ):
+        lane_id = int(match.group(1))
+        body = match.group(2)
+        points = [_coord_pair_from_match(m) for m in _COORD_LIST.finditer(body)]
+        points = [p for p in points if p is not None]
+        if points:
+            lanes.append({"lane_id": lane_id, "points": points})
+    if lanes:
+        return lanes
+    # Last resort: collect every 2-tuple in the text into a single lane.
+    points = [_coord_pair_from_match(m) for m in _COORD_LIST.finditer(text)]
+    points = [p for p in points if p is not None]
+    if points:
+        return [{"lane_id": 0, "points": points}]
+    return []
+
+
+def parse_scene_graph(text: str) -> list[dict[str, str]]:
+    """Scene-graph triples. Tolerant of prose.
+
+    Returns a list of ``{"subject": str, "relation": str, "object": str}``.
+    Recovers from strict JSON or from inline '(subj, rel, obj)' / 'subj rel obj'
+    mentions.
+    """
+    if not text:
+        return []
+    data = _extract_json_block(text)
+    triples: list[dict[str, str]] = []
+    if isinstance(data, list):
+        for item in data:
+            triple = _triple_from_item(item)
+            if triple:
+                triples.append(triple)
+    elif isinstance(data, dict) and isinstance(data.get("triples"), list):
+        for item in data["triples"]:
+            triple = _triple_from_item(item)
+            if triple:
+                triples.append(triple)
+    if triples:
+        return triples
+    # Prose fallback: '(subject, relation, object)' or '<subj> relation <obj>'.
+    for pattern in (
+        r"\(\s*([^()<>|,\n]{1,60}?)\s*,\s*([^()<>|,\n]{1,40}?)\s*,\s*([^()<>|,\n]{1,60}?)\s*\)",
+        r"<([^<>|,\n]{1,60}?)>\s*([a-z_]+)\s*<([^<>|,\n]{1,60}?)>",
+    ):
+        for match in re.finditer(pattern, text):
+            triples.append({
+                "subject": _clean_token(match.group(1)),
+                "relation": _clean_token(match.group(2)).lower().replace(" ", "_"),
+                "object": _clean_token(match.group(3)),
+            })
+    return triples
+
+
+def parse_drivable_area(text: str) -> dict[str, Any]:
+    """Drivable-area polygon (coord scale 0..1000). Tolerant of prose.
+
+    Returns ``{"polygon": [[x, y], ...]}`` (possibly empty).
+    """
+    if not text:
+        return {"polygon": []}
+    data = _extract_json_block(text)
+    if isinstance(data, dict):
+        raw = data.get("polygon")
+    elif isinstance(data, list):
+        raw = data  # some models emit a bare coordinate list
+    else:
+        raw = None
+    points: list[list[int]] = []
+    if isinstance(raw, list):
+        for p in raw:
+            pair = _coord_pair(p)
+            if pair is not None:
+                points.append(pair)
+    if points:
+        return {"polygon": points}
+    # Prose fallback: collect every coordinate pair in the text.
+    for match in _COORD_LIST.finditer(text):
+        pair = _coord_pair_from_match(match)
+        if pair is not None:
+            points.append(pair)
+    return {"polygon": points}
+
+
+def _coord_pair(value: Any) -> list[int] | None:
+    """Coerce one JSON value into an [x, y] integer pair, or None."""
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        try:
+            return [int(value[0]), int(value[1])]
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _coord_pair_from_match(match: re.Match[str]) -> list[int] | None:
+    """Coerce one _COORD_LIST regex match into an [x, y] (or bbox) pair."""
+    groups = match.groups()
+    if groups[2] is not None and groups[3] is not None:
+        # A 4-tuple bbox was matched; take the first corner as a point.
+        return [int(groups[0]), int(groups[1])]
+    return [int(groups[0]), int(groups[1])]
+
+
+def _clean_token(value: Any) -> str:
+    """Strip surrounding quotes/whitespace from a recovered triple token."""
+    text = str(value).strip().strip("\"'`")
+    return text
+
+
+def _triple_from_item(item: Any) -> dict[str, str] | None:
+    if not isinstance(item, dict):
+        return None
+    subject = item.get("subject") or item.get("src") or item.get("head")
+    relation = item.get("relation") or item.get("rel") or item.get("predicate")
+    obj = item.get("object") or item.get("dst") or item.get("tail")
+    if subject and relation and obj:
+        return {
+            "subject": _clean_token(subject),
+            "relation": _clean_token(relation).lower().replace(" ", "_"),
+            "object": _clean_token(obj),
+        }
+    return None
+
+
 # skill_key -> (parser, coordinate_scale)
 # coordinate_scale: 1000 | 999 | 0 (0 = no spatial coords / N/A)
 PARSERS: dict[str, tuple[Callable[[str], Any], int]] = {
@@ -136,6 +336,11 @@ PARSERS: dict[str, tuple[Callable[[str], Any], int]] = {
     "mmcode": (parse_plain, 0),
     "computer_use": (parse_plain, 1000),
     "mobile_agent": (parse_plain, 999),
+    # Auto-labelling skills (driving / nuScenes-style):
+    "nuscenes_2d_detection": (parse_grounding_1000, 1000),
+    "nuscenes_lane": (parse_lane, 1000),
+    "nuscenes_scene_graph": (parse_scene_graph, 0),
+    "nuscenes_drivable_area": (parse_drivable_area, 1000),
 }
 
 
