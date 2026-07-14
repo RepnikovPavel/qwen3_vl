@@ -61,15 +61,19 @@ class DemoGenerationTest(unittest.TestCase):
         self.assertEqual((input_device, visual_device), ("meta", "meta"))
         self.assertTrue(all(value.device.type == "meta" for value in moved.values()))
 
-    def test_split_vision_and_embedding_devices_are_rejected(self):
+    def test_split_vision_and_embedding_devices_are_supported(self):
+        # Split placement (balanced): vision tower and text embeddings may
+        # legitimately live on different devices. model_input_devices returns
+        # both so move_inputs_to_model_devices can route each key correctly.
         embedding = torch.nn.Embedding(8, 3, device="meta")
         visual = torch.nn.Linear(2, 2)
         model = SimpleNamespace(
             get_input_embeddings=lambda: embedding,
             model=SimpleNamespace(visual=visual),
         )
-        with self.assertRaisesRegex(RuntimeError, "must share a device"):
-            model_input_devices(model)
+        embedding_device, visual_device = model_input_devices(model)
+        self.assertEqual(embedding_device.type, "meta")
+        self.assertEqual(visual_device.type, "cpu")
 
     def test_result_serializes_all_demo_metrics(self):
         result = DemoGenerationResult(
