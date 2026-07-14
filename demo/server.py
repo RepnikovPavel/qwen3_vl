@@ -20,6 +20,7 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict
 
 from demo.generation import DemoGenerationResult, run_streaming_generation
+from demo.grounding_viz import draw_grounding, parse_grounding, save_annotated
 from demo.model_manager import PLACEMENTS, DemoBusyError, DemoModelManager
 from demo.sessions import SessionStore
 from demo.tasks import (
@@ -671,6 +672,106 @@ def create_app(
         if not path.is_relative_to(media_root) or not path.is_file():
             raise HTTPException(404, "media file not found")
         return FileResponse(path, media_type=item["mime_type"])
+
+    # ------------------------------ 2D Grounding (reproduces 2d_grounding.ipynb) ------------------------------
+
+    class GroundingResponse(BaseModel):
+        text: str
+        annotated_media_id: str | None = None
+        parsed: list[dict[str, Any]] = []
+        width: int | None = None
+        height: int | None = None
+        tokens_per_second: float | None = None
+
+    @app.post("/api/grounding", response_model=GroundingResponse)
+    async def grounding(
+        image: UploadFile = File(...),
+        prompt: str = Form("Locate the main objects. Report bbox coordinates in JSON format."),
+        max_new_tokens: int = Form(256),
+        max_image_side: int = Form(640),
+        model_size: str = Form("8b"),
+    ):
+        """2D Grounding mode.
+
+        Replicates the key flows from the official 2d_grounding.ipynb:
+        - natural language prompts for bbox / point grounding
+        - JSON output with bbox_2d / point_2d + optional extra fields (label, color, type, role, ...)
+        - server-side visualization (boxes + points drawn on the image)
+        """
+        if not (image.content_type or "").startswith("image/"):
+            raise HTTPException(400, "2D grounding currently supports single images")
+
+        media_root = Path(os.environ.get("DEMO_STATE_DIR", "/state")) / "media"
+        media_root.mkdir(parents=True, exist_ok=True)
+
+        suffix = Path(image.filename or "upload.jpg").suffix or ".jpg"
+        tmp_path = media_root / f"ground_{uuid.uuid4().hex}{suffix}"
+        data = await image.read()
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "image too large")
+        tmp_path.write_bytes(data)
+
+        # obtain runtime
+        try:
+            with manager.operation():
+                rt = manager.load(model_size, "single")
+        except DemoBusyError:
+            raise HTTPException(503, "model is busy")
+        except Exception as exc:
+            raise HTTPException(500, f"failed to load model: {exc}")
+
+        try:
+            media = rt.prepare_media([("image", str(tmp_path))], max_image_side)
+
+            # Build a minimal chat turn (same as regular path)
+            from qwen3_vl_offline import build_messages  # type: ignore
+
+            messages = build_messages(media, prompt, [], None)
+            inputs = rt.processor.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_dict=True,
+                return_tensors="pt",
+            )
+            from demo.generation import move_inputs_to_model_devices
+            inputs, _, _ = move_inputs_to_model_devices(rt.model, inputs)
+
+            import torch
+            with torch.inference_mode():
+                out = rt.model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=False,
+                    return_dict_in_generate=True,
+                )
+            cont = out.sequences[:, inputs["input_ids"].shape[1] :]
+            raw = rt.processor.batch_decode(
+                cont, skip_special_tokens=True, clean_up_tokenization_spaces=False
+            )[0]
+            clean_text = raw.strip()
+
+            parsed = parse_grounding(clean_text)
+            orig = Image.open(tmp_path).convert("RGB")
+            annotated = draw_grounding(orig, parsed)
+            ann_name = f"ground_{uuid.uuid4().hex}.png"
+            ann_path = media_root / ann_name
+            annotated.save(ann_path)
+
+            return GroundingResponse(
+                text=clean_text,
+                annotated_media_id=ann_name,
+                parsed=parsed,
+                width=orig.width,
+                height=orig.height,
+            )
+        except Exception as exc:
+            raise HTTPException(500, f"grounding inference failed: {type(exc).__name__}: {exc}")
+        finally:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     @app.post("/api/chat")
     async def chat(

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Reproducible single-image latency benchmark for one Qwen3-VL model.
-Server proofs (gr2 2x4090 + tuna 5060ti) captured via nvidia-smi during container runs (100% util verified)."""
+Server proofs (2x RTX 4090) captured via nvidia-smi during container runs (100% util verified)."""
 
 from __future__ import annotations
 

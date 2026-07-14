@@ -97,7 +97,20 @@ class DemoPreset:
         }
 
 
+# 2D Grounding preset (visual, handled specially by /api/grounding + frontend)
+# We register it so it appears in task lists; the actual execution path is different.
+GROUNDING_PRESET = DemoPreset(
+    key="2d_grounding",
+    label="2D Grounding (bbox / points)",
+    prompt=None,
+    output_kind="text",  # we post-process on client/server
+    default_max_new_tokens=256,
+    default_max_image_side=640,
+    accepts_custom_prompt=True,
+)
+
 _PRESET_ITEMS = (
+    GROUNDING_PRESET,
     DemoPreset(
         key="describe",
         label="Describe",

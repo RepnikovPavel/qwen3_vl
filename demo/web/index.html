@@ -3408,5 +3408,193 @@
       bootstrap();
     })();
   </script>
+
+  <!-- ===================== 2D GROUNDING WINDOW / MODE (reproduces 2d_grounding.ipynb) ===================== -->
+  <style>
+    #ground-modal { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: none; align-items: center; justify-content: center; z-index: 9999; }
+    #ground-modal.open { display: flex; }
+    .ground-card { background: #11151d; border: 1px solid #303748; border-radius: 16px; width: min(1100px, 96vw); max-height: 92vh; overflow: auto; padding: 20px; box-shadow: var(--shadow); }
+    .ground-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+    .ground-grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+    @media (max-width: 900px) { .ground-grid { grid-template-columns: 1fr; } }
+    .ground-preview { border:1px solid #303748; border-radius:12px; overflow:hidden; background:#0a0d14; }
+    .ground-preview img { max-width:100%; display:block; }
+    .ground-examples { display:flex; flex-wrap:wrap; gap:6px; }
+    .ground-ex { font-size:12px; padding:4px 8px; border:1px solid #303748; border-radius:6px; background:#171c26; cursor:pointer; }
+    .ground-ex:hover { border-color: var(--accent); }
+  </style>
+
+  <div id="ground-modal">
+    <div class="ground-card">
+      <div class="ground-header">
+        <div>
+          <strong>2D Grounding</strong>
+          <span class="muted" style="margin-left:8px">Reproduces cookbook flows (bbox / point, multi-target, attributes)</span>
+        </div>
+        <button onclick="closeGrounding()" class="secondary">Close</button>
+      </div>
+
+      <div class="ground-grid">
+        <div>
+          <label>Image
+            <input id="ground-file" type="file" accept="image/*">
+          </label>
+          <div id="ground-preview" class="ground-preview" style="margin-top:8px; min-height:160px; display:flex; align-items:center; justify-content:center; color:#677184;">
+            <span>Image preview will appear here</span>
+          </div>
+
+          <div style="margin-top:12px">
+            <div class="muted" style="font-size:12px;margin-bottom:4px">Example prompts (click)</div>
+            <div class="ground-examples">
+              <span class="ground-ex" data-p="locate every instance that belongs to the following categories: &quot;plate, bowl, cup, person&quot;. Report bbox coordinates in JSON format.">Multi-object locate (bbox JSON)</span>
+              <span class="ground-ex" data-p="Locate every person. For each report bbox, role (player/referee) and shirt color in JSON.">People + attributes (bbox)</span>
+              <span class="ground-ex" data-p="Locate the top-right brown cake and output its bbox coordinates in JSON.">Specific object</span>
+              <span class="ground-ex" data-p="Locate every person inside the area with points. Report point_2d + role + shirt_color in JSON.">Point grounding + attrs</span>
+              <span class="ground-ex" data-p="Outline every vehicle. Include type and color in the JSON objects.">Vehicles with extra fields</span>
+            </div>
+          </div>
+
+          <label style="margin-top:12px">Grounding prompt
+            <textarea id="ground-prompt" style="min-height:90px">Locate every instance that belongs to the following categories: "car, person, bicycle". Report bbox coordinates in JSON format.</textarea>
+          </label>
+
+          <div class="grid" style="margin-top:8px">
+            <label>max new tokens<input id="ground-tokens" type="number" value="160" min="32" max="1024"></label>
+            <label>max image side<input id="ground-side" type="number" value="640" min="256" max="2048"></label>
+          </div>
+
+          <div class="actions" style="margin-top:12px">
+            <button id="ground-run" onclick="runGrounding()">Run 2D Grounding</button>
+            <button onclick="closeGrounding()" class="secondary">Cancel</button>
+          </div>
+          <div id="ground-error" style="color:#ff8e98;margin-top:6px"></div>
+        </div>
+
+        <div>
+          <div><strong>Result</strong></div>
+          <div id="ground-annotated-wrap" class="ground-preview" style="margin:8px 0; min-height:220px">
+            <img id="ground-annotated" style="display:none; max-width:100%" />
+          </div>
+          <div><strong>Model text (JSON)</strong></div>
+          <pre id="ground-text" style="white-space:pre-wrap; background:#0a0d14; padding:10px; border-radius:8px; min-height:120px; overflow:auto"></pre>
+          <div style="margin-top:6px">
+            <button onclick="downloadGroundAnnotated()" class="secondary">Download annotated image</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---- 2D Grounding integration ----
+    (function(){
+      const modal = document.getElementById('ground-modal');
+      const fileIn = document.getElementById('ground-file');
+      const preview = document.getElementById('ground-preview');
+      const promptTa = document.getElementById('ground-prompt');
+      const runBtn = document.getElementById('ground-run');
+      const errEl = document.getElementById('ground-error');
+      const annImg = document.getElementById('ground-annotated');
+      const textPre = document.getElementById('ground-text');
+
+      let currentAnnUrl = null;
+      let currentFileUrl = null;
+
+      // expose opener from sidebar (see HTML addition below)
+      window.openGrounding = function() {
+        modal.classList.add('open');
+        errEl.textContent = '';
+        textPre.textContent = '';
+        annImg.style.display = 'none';
+        if (currentAnnUrl) { URL.revokeObjectURL(currentAnnUrl); currentAnnUrl = null; }
+      };
+      window.closeGrounding = function() {
+        modal.classList.remove('open');
+        if (currentAnnUrl) { URL.revokeObjectURL(currentAnnUrl); currentAnnUrl = null; }
+      };
+
+      fileIn.addEventListener('change', () => {
+        const f = fileIn.files[0];
+        if (!f) return;
+        if (currentFileUrl) URL.revokeObjectURL(currentFileUrl);
+        currentFileUrl = URL.createObjectURL(f);
+        preview.innerHTML = `<img src="${currentFileUrl}" style="max-width:100%;display:block" />`;
+      });
+
+      // click examples
+      document.querySelectorAll('#ground-modal .ground-ex').forEach(el => {
+        el.addEventListener('click', () => {
+          promptTa.value = el.getAttribute('data-p') || el.textContent;
+        });
+      });
+
+      window.runGrounding = async function() {
+        errEl.textContent = '';
+        const f = fileIn.files[0];
+        if (!f) { errEl.textContent = 'Please select an image'; return; }
+        const p = promptTa.value.trim();
+        if (!p) { errEl.textContent = 'Prompt is required'; return; }
+
+        runBtn.disabled = true;
+        runBtn.textContent = 'Running...';
+
+        try {
+          const fd = new FormData();
+          fd.append('image', f);
+          fd.append('prompt', p);
+          fd.append('max_new_tokens', document.getElementById('ground-tokens').value);
+          fd.append('max_image_side', document.getElementById('ground-side').value);
+
+          const res = await fetch('/api/grounding', { method: 'POST', body: fd });
+          if (!res.ok) {
+            const t = await res.text();
+            throw new Error(t || res.statusText);
+          }
+          const j = await res.json();
+
+          textPre.textContent = j.text || '(no text)';
+
+          if (j.annotated_media_id) {
+            // annotated is served from /state/media/...
+            const url = '/state/media/' + j.annotated_media_id;
+            annImg.src = url;
+            annImg.style.display = 'block';
+            currentAnnUrl = url; // not blob, direct
+          } else {
+            annImg.style.display = 'none';
+          }
+        } catch (e) {
+          errEl.textContent = 'Grounding error: ' + e.message;
+        } finally {
+          runBtn.disabled = false;
+          runBtn.textContent = 'Run 2D Grounding';
+        }
+      };
+
+      window.downloadGroundAnnotated = function() {
+        if (!annImg.src) return;
+        const a = document.createElement('a');
+        a.href = annImg.src;
+        a.download = 'grounding_annotated.png';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      };
+
+      // Add a button to the sidebar (non-destructive)
+      setTimeout(() => {
+        const sb = document.querySelector('.sidebar-tools');
+        if (sb && !document.getElementById('open-ground-btn')) {
+          const btn = document.createElement('button');
+          btn.id = 'open-ground-btn';
+          btn.className = 'secondary';
+          btn.style.cssText = 'margin:6px 0;width:100%';
+          btn.textContent = '2D Grounding';
+          btn.onclick = () => window.openGrounding && window.openGrounding();
+          sb.appendChild(btn);
+        }
+      }, 600);
+    })();
+  </script>
 </body>
 </html>

@@ -1,0 +1,14 @@
+benchmark
+cache_fp8_kernel
+context_sweep
+demo
+download_models
+evaluate_vl
+generate_eval_fixtures
+model_catalog
+parity
+qwen3_vl
+qwen3_vl_offline
+reference_vl
+run_vl_eval
+web_ui

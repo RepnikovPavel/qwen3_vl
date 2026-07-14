@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: qwen3-vl-local-demo
+Version: 0.3.0
+Summary: Strict-offline Qwen3-VL Thinking FP8 CLI, Web UI, and benchmarks
+Requires-Python: >=3.12
