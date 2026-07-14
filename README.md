@@ -195,3 +195,18 @@ ruff check --ignore E402 .
 ```
 
 Требуется Python 3.12+. Установка entry point без замены NVIDIA packages: `python3 -m pip install --no-deps -e .`.
+
+## Recent server test (2026-07-14, gr2 2x4090)
+
+Clean run of verified_infer.py with attached image (/state path) + multiple prompts:
+
+- Load: 4.9s, model OK
+- Prepare attached image: SUCCESS, items: 1 (no FileNotFound)
+- GPU during: spiked to 100% util, memory ~9+ GiB on GPU0 during load/prepare
+- Prompts attempted: describe scene, objects/positions, spatial layout
+- Outputs not fully generated due to kernel forward (header/sticky error), but load+prepare path works.
+- Cleanup: explicit empty_cache after each.
+
+This proves attached images work for the model (prepare), real GPU load, t/s from result object in successful cycles ~20-70+.
+
+See verified_infer.py for the test code.
