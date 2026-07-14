@@ -741,6 +741,12 @@ class Qwen3VLRuntime:
         # Ensure we can clean up on errors
         self._cleanup = _cleanup_cuda if device == "cuda" else (lambda: None)
 
+    def __del__(self):
+        try:
+            self._cleanup()
+        except Exception:
+            pass
+
         torch.manual_seed(seed)
         if device == "cuda":
             torch.cuda.manual_seed_all(seed)
