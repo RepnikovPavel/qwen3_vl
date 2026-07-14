@@ -29,7 +29,7 @@ from qwen3_vl_offline import (
     Qwen3VLRuntime,
     validate_generation_settings,
 )
-from skills import SKILLS, SkillError, resolve_skill
+from skills import SKILLS, resolve_skill
 from skill_parsers import parse_skill
 
 
@@ -281,10 +281,8 @@ def run_benchmark(args) -> dict[str, object]:
             max_image_side=args.max_image_side,
         )
         prompt = resolved["prompt"]
-        task = f"skill:{skill_key}"
     else:
         prompt = args.prompt or TASK_PROMPTS.get(args.task, DEFAULT_PROMPT)
-        task = args.task
     image_path = Path(args.image).expanduser().resolve()
     if not image_path.is_file():
         raise FileNotFoundError(f"benchmark image does not exist: {image_path}")
@@ -388,7 +386,6 @@ def run_benchmark(args) -> dict[str, object]:
     # skill's expected output structure (JSON bboxes, LaTeX, ...).
     skill_verification = None
     if skill_key and runs:
-        last_answer = ""  # answer text is not stored per-run to keep JSON small; re-derive via sha not possible
         # Re-run a single short inference purely for verification of structure.
         try:
             verify_result, _ = runtime.infer(

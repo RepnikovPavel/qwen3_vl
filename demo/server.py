@@ -11,7 +11,7 @@ import uuid
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -20,8 +20,8 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict
 
 from demo.generation import DemoGenerationResult, run_streaming_generation
-from demo.grounding_3d_viz import draw_3d_bboxes, generate_camera_params, parse_bbox_3d_from_text, save_annotated_3d
-from demo.grounding_viz import draw_grounding, parse_grounding, save_annotated
+from demo.grounding_3d_viz import draw_3d_bboxes, generate_camera_params, parse_bbox_3d_from_text
+from demo.grounding_viz import draw_grounding, parse_grounding
 from demo.model_manager import PLACEMENTS, DemoBusyError, DemoModelManager
 from demo.sessions import SessionStore
 from demo.tasks import (

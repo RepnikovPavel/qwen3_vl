@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import struct
-import sys
 from pathlib import Path
 from typing import Iterator
 
@@ -73,13 +72,14 @@ def _decode_image(payload: bytes) -> dict:
     cdr = _CDR(payload, offset=4)  # skip encapsulation header
     # header.stamp (sec: u32, nanosec: u32)
     cdr._align(4)
-    stamp_sec = struct.unpack_from("<I", cdr.data, cdr.pos)[0]; cdr.pos += 4
-    stamp_nsec = struct.unpack_from("<I", cdr.data, cdr.pos)[0]; cdr.pos += 4
+    stamp_sec = struct.unpack_from("<I", cdr.data, cdr.pos)[0]
+    cdr.pos += 4
+    stamp_nsec = struct.unpack_from("<I", cdr.data, cdr.pos)[0]
+    cdr.pos += 4
     frame_id = cdr.string()
     height = cdr.u32()
     width = cdr.u32()
     encoding = cdr.string()
-    is_bigendian = cdr.boolean()
     cdr._align(4)
     step = cdr.u32()
     raw = cdr.bytes()
