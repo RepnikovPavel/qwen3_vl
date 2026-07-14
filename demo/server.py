@@ -688,8 +688,8 @@ def create_app(
     async def grounding(
         image: UploadFile = File(...),
         prompt: str = Form('Locate every instance that belongs to the following categories: "car, person, vehicle". Report bbox coordinates in JSON format.'),
-        max_new_tokens: int = Form(4096),
-        max_image_side: int = Form(2048),
+        max_new_tokens: int = Form(200000),
+        max_image_side: int = Form(0),
         model_size: str = Form("2b"),
     ):
         """2D Grounding mode.
@@ -808,8 +808,8 @@ def create_app(
     async def grounding_3d(
         image: UploadFile = File(...),
         prompt: str = Form('Find all cars in this image. For each car, provide its 3D bounding box. The output format required is JSON.'),
-        max_new_tokens: int = Form(4096),
-        max_image_side: int = Form(2048),
+        max_new_tokens: int = Form(200000),
+        max_image_side: int = Form(0),
         model_size: str = Form("2b"),
         fov: float = Form(60.0),
     ):

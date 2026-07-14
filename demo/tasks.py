@@ -16,9 +16,9 @@ from evaluate_vl import (
 )
 
 
-MAX_NEW_TOKENS = 131_072  # increased for longer thinking / large context
-MIN_IMAGE_SIDE = 64
-MAX_IMAGE_SIDE = 4096
+MAX_NEW_TOKENS = 200_000  # 200K default for long thinking / detailed outputs on full VRAM
+MIN_IMAGE_SIDE = 0
+MAX_IMAGE_SIDE = 0  # 0 means no limit / use input resolution as-is
 MAX_CUSTOM_PROMPT_CHARACTERS = 200_000
 
 
@@ -37,9 +37,9 @@ def _validate_limits(max_new_tokens: Any, max_image_side: Any) -> tuple[int, int
     side = _validate_integer(max_image_side, "max_image_side")
     if not 1 <= tokens <= MAX_NEW_TOKENS:
         raise DemoTaskError(f"max_new_tokens must be between 1 and {MAX_NEW_TOKENS}")
-    if not MIN_IMAGE_SIDE <= side <= MAX_IMAGE_SIDE:
+    if side != 0 and not (MIN_IMAGE_SIDE <= side <= MAX_IMAGE_SIDE or MAX_IMAGE_SIDE == 0):
         raise DemoTaskError(
-            f"max_image_side must be between {MIN_IMAGE_SIDE} and {MAX_IMAGE_SIDE}"
+            f"max_image_side must be 0 (no resize) or between {MIN_IMAGE_SIDE} and {MAX_IMAGE_SIDE}"
         )
     return tokens, side
 
@@ -104,8 +104,8 @@ GROUNDING_PRESET = DemoPreset(
     label="2D Grounding (bbox / points)",
     prompt=None,
     output_kind="text",  # we post-process on client/server
-    default_max_new_tokens=4096,
-    default_max_image_side=640,
+    default_max_new_tokens=200000,
+    default_max_image_side=0,
     accepts_custom_prompt=True,
 )
 
@@ -114,8 +114,8 @@ GROUNDING_3D_PRESET = DemoPreset(
     label="3D Grounding (3D bboxes)",
     prompt=None,
     output_kind="text",  # post-process for 3D viz
-    default_max_new_tokens=4096,
-    default_max_image_side=640,
+    default_max_new_tokens=200000,
+    default_max_image_side=0,
     accepts_custom_prompt=True,
 )
 
@@ -127,8 +127,8 @@ _PRESET_ITEMS = (
         label="Describe",
         prompt="Describe the visual content completely and precisely.",
         output_kind="text",
-        default_max_new_tokens=2048,
-        default_max_image_side=640,
+        default_max_new_tokens=200000,
+        default_max_image_side=0,
     ),
     DemoPreset(
         key="ocr",
@@ -138,8 +138,8 @@ _PRESET_ITEMS = (
             "Render tables as lines whose cells are separated by ` | `. Return only text."
         ),
         output_kind="text",
-        default_max_new_tokens=4096,
-        default_max_image_side=1280,
+        default_max_new_tokens=200000,
+        default_max_image_side=0,
     ),
     DemoPreset(
         key="formula",
@@ -149,8 +149,8 @@ _PRESET_ITEMS = (
             'JSON object with schema {"formulas":["latex","..."]}. Do not use Markdown fences.'
         ),
         output_kind="formula",
-        default_max_new_tokens=4096,
-        default_max_image_side=1280,
+        default_max_new_tokens=200000,
+        default_max_image_side=0,
     ),
     DemoPreset(
         key="chart",
@@ -162,16 +162,16 @@ _PRESET_ITEMS = (
             "subject, relation, and object. Do not use Markdown fences."
         ),
         output_kind="chart",
-        default_max_new_tokens=16_384,
-        default_max_image_side=1280,
+        default_max_new_tokens=200000,
+        default_max_image_side=0,
     ),
     DemoPreset(
         key="custom",
         label="Custom prompt",
         prompt=None,
         output_kind="text",
-        default_max_new_tokens=16384,
-        default_max_image_side=640,
+        default_max_new_tokens=200000,
+        default_max_image_side=0,
         accepts_custom_prompt=True,
     ),
     # Additional presets for full standard Qwen3-VL capabilities (video, documents, spatial, reasoning)
@@ -185,8 +185,8 @@ _PRESET_ITEMS = (
             "Use as many tokens as needed for complete coverage."
         ),
         output_kind="text",
-        default_max_new_tokens=8192,
-        default_max_image_side=640,
+        default_max_new_tokens=200000,
+        default_max_image_side=0,
     ),
     DemoPreset(
         key="document_parsing",
@@ -197,8 +197,8 @@ _PRESET_ITEMS = (
             "Preserve logical reading order and structure. Use long output if the document is complex."
         ),
         output_kind="text",
-        default_max_new_tokens=16384,
-        default_max_image_side=1280,
+        default_max_new_tokens=200000,
+        default_max_image_side=0,
     ),
     DemoPreset(
         key="spatial_understanding",
@@ -209,8 +209,8 @@ _PRESET_ITEMS = (
             "Use clear directional references."
         ),
         output_kind="text",
-        default_max_new_tokens=3072,
-        default_max_image_side=896,
+        default_max_new_tokens=200000,
+        default_max_image_side=0,
     ),
     DemoPreset(
         key="think_detailed",
@@ -221,8 +221,8 @@ _PRESET_ITEMS = (
             "You may use up to tens of thousands of tokens for detailed reasoning if needed."
         ),
         output_kind="text",
-        default_max_new_tokens=32768,
-        default_max_image_side=640,
+        default_max_new_tokens=200000,
+        default_max_image_side=0,
     ),
 )
 

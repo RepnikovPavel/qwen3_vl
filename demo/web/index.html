@@ -1793,8 +1793,8 @@
             <details class="advanced" id="advancedSettings">
               <summary>Generation settings</summary>
               <div class="advanced-grid">
-                <label class="advanced-field"><span class="field-label">Max tokens</span><input class="number-input" id="maxTokens" type="number" min="1" max="131072" step="1" value="8192"></label>
-                <label class="advanced-field"><span class="field-label">Max image side</span><input class="number-input" id="maxImageSide" type="number" min="64" max="4096" step="64" value="640"></label>
+                <label class="advanced-field"><span class="field-label">Max tokens</span><input class="number-input" id="maxTokens" type="number" min="1" max="200000" step="1" value="200000"></label>
+                <label class="advanced-field"><span class="field-label">Max image side</span><input class="number-input" id="maxImageSide" type="number" min="0" max="16384" step="64" value="0"></label>
                 <label class="advanced-field"><span class="field-label">Sampling</span><span class="toggle-field"><input id="doSample" type="checkbox" checked> Enable</span></label>
                 <label class="advanced-field"><span class="field-label">Temperature</span><input class="number-input" id="temperature" type="number" min="0.01" max="5" step="0.05" value="0.6"></label>
                 <label class="advanced-field"><span class="field-label">Top P</span><input class="number-input" id="topP" type="number" min="0.01" max="1" step="0.01" value="0.95"></label>
@@ -2423,15 +2423,15 @@
         elements.customPrompt.style.display = "block";
         if (applyDefaults && task) {
           if (task.default_max_new_tokens) elements.maxTokens.value = task.default_max_new_tokens;
-          if (task.default_max_image_side) elements.maxImageSide.value = task.default_max_image_side;
+          if (task.default_max_image_side !== undefined) elements.maxImageSide.value = task.default_max_image_side;
         }
         // For 2D/3D grounding, prefer higher res (to recognize many objects) and higher token budget
         // so that long lists of bboxes + descriptions are not truncated.
         if (task && (task.key === "grounding_2d" || task.key === "grounding_3d")) {
-          const curSide = parseInt(elements.maxImageSide.value || "0", 10);
-          if (curSide < 2048) elements.maxImageSide.value = 2048;
+          // disable resize: use input resolution as-is
+          elements.maxImageSide.value = 0;
           const curTok = parseInt(elements.maxTokens.value || "0", 10);
-          if (curTok < 4096) elements.maxTokens.value = 4096;
+          if (curTok < 200000) elements.maxTokens.value = 200000;
         }
         const label = task ? task.label || task.key : "vision task";
         elements.composerHint.replaceChildren();
@@ -3135,7 +3135,7 @@
           // Resize images client-side to the chosen max_image_side so that the image shown in liveVisual
           // and history is *exactly* the resolution fed to the model (no surprise resize on server).
           // This makes bbox drawing accurate and fulfills "see the exact image that entered the model".
-          const maxSide = parseInt(elements.maxImageSide.value || "2048", 10);
+          const maxSide = parseInt(elements.maxImageSide.value || "0", 10);
           for (let i = 0; i < state.files.length; i++) {
             const item = state.files[i];
             if (item.file && item.file.type && item.file.type.startsWith("image/")) {
