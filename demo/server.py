@@ -520,6 +520,12 @@ def create_app(
     def tasks():
         return public_presets()
 
+    @app.get("/api/skills")
+    def skills():
+        from skills import public_skills
+
+        return public_skills()
+
     @app.get("/api/status")
     def status():
         prune_generations()

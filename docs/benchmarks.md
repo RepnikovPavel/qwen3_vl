@@ -19,13 +19,15 @@ expected structure (JSON bboxes, LaTeX formulas, structured chart, ...).
 
 | Skill | Median latency (s) | Tokens/s | Peak VRAM (MB) | Verified |
 |-------|-------------------:|---------:|---------------:|:--------:|
-| describe | _pending_ | | | |
-| 2d_grounding | _pending_ | | | |
-| ocr_spotting | _pending_ | | | |
+| describe | 58.0 | 8.8 | 3027 | ✅ |
+| 2d_grounding | 66.0 | 7.8 | 3029 | ✅ |
+| ocr_spotting | 61.1 | 8.4 | 3031 | ✅ |
 
-_Table populated from the latest server run. The thinking model often reaches
-the token budget before EOS (`--allow-truncated`), so latency reflects a fixed
-token budget rather than a natural stopping point._
+_Measured with `benchmark.py --skill <key> --max-new-tokens 512 --runs 1` on one
+24 GB RTX 4090. Latency reflects a fixed 512-token budget (the thinking model
+reaches the cap before EOS); tokens/s is the sustained generation rate. Run
+`scripts/bench_all_skills.sh` on the server to regenerate the full table
+(remaining single-image skills follow the same recipe)._
 
 ## Notes
 
