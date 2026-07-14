@@ -37,9 +37,11 @@ def _validate_limits(max_new_tokens: Any, max_image_side: Any) -> tuple[int, int
     side = _validate_integer(max_image_side, "max_image_side")
     if not 1 <= tokens <= MAX_NEW_TOKENS:
         raise DemoTaskError(f"max_new_tokens must be between 1 and {MAX_NEW_TOKENS}")
-    if side != 0 and not (MIN_IMAGE_SIDE <= side <= MAX_IMAGE_SIDE or MAX_IMAGE_SIDE == 0):
+    # 0 means "do not resize, feed the image at its native resolution"; any
+    # positive int caps the longest side. Negative values are never valid.
+    if side < 0:
         raise DemoTaskError(
-            f"max_image_side must be 0 (no resize) or between {MIN_IMAGE_SIDE} and {MAX_IMAGE_SIDE}"
+            "max_image_side must be 0 (no resize) or a positive number of pixels"
         )
     return tokens, side
 

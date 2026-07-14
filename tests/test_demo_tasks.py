@@ -44,10 +44,11 @@ class DemoPresetTest(unittest.TestCase):
         self.assertIn("spatial_understanding", keys)
         self.assertIn("think_detailed", keys)
         self.assertEqual(keys[-1], "think_detailed")  # last added
-        self.assertEqual(get_preset("describe").default_max_image_side, 640)
-        self.assertEqual(get_preset("ocr").default_max_image_side, 1280)
-        self.assertEqual(get_preset("formula").default_max_new_tokens, 4096)
-        self.assertEqual(get_preset("chart").default_max_new_tokens, 16_384)
+        # 0 == no resize / native resolution (since the no-limit default change).
+        self.assertEqual(get_preset("describe").default_max_image_side, 0)
+        self.assertEqual(get_preset("ocr").default_max_image_side, 0)
+        self.assertEqual(get_preset("formula").default_max_new_tokens, 200_000)
+        self.assertEqual(get_preset("chart").default_max_new_tokens, 200_000)
         self.assertTrue(get_preset("formula").structured_output)
         self.assertFalse(get_preset("ocr").structured_output)
         # Grounding are text but specially handled
@@ -107,8 +108,9 @@ class TaskResolutionTest(unittest.TestCase):
         ocr = resolve_task("ocr")
         self.assertEqual(ocr["task"], "ocr")
         self.assertIn("Transcribe all visible text", ocr["prompt"])
-        self.assertEqual(ocr["max_new_tokens"], 4096)
-        self.assertEqual(ocr["max_image_side"], 1280)
+        # All presets default to the no-limit policy: 200K tokens, 0 (native) side.
+        self.assertEqual(ocr["max_new_tokens"], 200_000)
+        self.assertEqual(ocr["max_image_side"], 0)
 
         custom = resolve_task(
             "custom",
@@ -126,11 +128,11 @@ class TaskResolutionTest(unittest.TestCase):
             lambda: get_preset("missing"),
             lambda: resolve_task("custom"),  # missing required custom_prompt
             # Note: resolve_task("ocr", custom_prompt=...) is now ALLOWED (free override for all)
-            lambda: resolve_task("describe", max_new_tokens=True),
-            lambda: resolve_task("describe", max_new_tokens=0),
-            lambda: resolve_task("describe", max_new_tokens=200_000),  # > MAX_NEW_TOKENS=131072
-            lambda: resolve_task("describe", max_image_side=63),
-            lambda: resolve_task("describe", max_image_side=4097),
+            lambda: resolve_task("describe", max_new_tokens=True),   # non-int
+            lambda: resolve_task("describe", max_new_tokens=0),       # below 1
+            lambda: resolve_task("describe", max_new_tokens=200_001),  # > MAX_NEW_TOKENS
+            lambda: resolve_task("describe", max_image_side=-1),      # negative never valid
+            lambda: resolve_task("describe", max_image_side=True),    # non-int
             lambda: resolve_task("custom", custom_prompt="x" * 200_001),
         ]
         for call in invalid_calls:
@@ -152,7 +154,9 @@ class TaskResolutionTest(unittest.TestCase):
             self.assertEqual(res["label"], preset.label)
             self.assertIn("prompt", res)
             self.assertGreater(res["max_new_tokens"], 0)
-            self.assertGreater(res["max_image_side"], 0)
+            # 0 (native resolution, no resize) is the policy default; a positive
+            # value is also accepted. Negative is never valid (checked elsewhere).
+            self.assertGreaterEqual(res["max_image_side"], 0)
             # grounding and custom are always text (viz or free-form)
             if key in ("grounding_2d", "grounding_3d", "custom"):
                 self.assertEqual(res["output_kind"], "text")

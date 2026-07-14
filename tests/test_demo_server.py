@@ -113,6 +113,7 @@ class DemoServerTest(unittest.TestCase):
             top_k,
             stop_event,
             emit,
+            video_num_frames=32,
         ):
             emit(
                 {
@@ -177,7 +178,8 @@ class DemoServerTest(unittest.TestCase):
         tasks = self.client.get("/api/tasks")
 
         self.assertEqual(index.status_code, 200)
-        self.assertIn("Qwen3 VL FP8 Studio", index.text)
+        # The rewritten minimal UI ships the model name in <title>Qwen3-VL</title>.
+        self.assertIn("Qwen3-VL", index.text)
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json(), {"status": "ok"})
         self.assertEqual(readiness.status_code, 200)
@@ -197,9 +199,23 @@ class DemoServerTest(unittest.TestCase):
         )
         self.assertEqual(tasks.status_code, 200)
         self.assertEqual(tasks.json()["schema_version"], 1)
+        # Order matches the registry: grounding presets first, then the
+        # standard describe/ocr/formula/chart/custom, then the extended tasks.
         self.assertEqual(
             [item["key"] for item in tasks.json()["tasks"]],
-            ["describe", "ocr", "formula", "chart", "custom"],
+            [
+                "grounding_2d",
+                "grounding_3d",
+                "describe",
+                "ocr",
+                "formula",
+                "chart",
+                "custom",
+                "video_understanding",
+                "document_parsing",
+                "spatial_understanding",
+                "think_detailed",
+            ],
         )
 
         (default_snapshot_path(self.ckpt_dir, "2b") / "tokenizer.json").unlink()
@@ -424,6 +440,7 @@ class DemoServerTest(unittest.TestCase):
             top_k,
             stop_event,
             emit,
+            video_num_frames=32,
         ):
             emit({"type": "token", "phase": "reasoning", "text": "Working"})
             started.set()
