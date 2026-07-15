@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-import qwen3_vl.context_sweep
+import qwen3_vl.context_sweep as context_sweep
 
 
 class ContextCandidateIsolationTest(unittest.TestCase):

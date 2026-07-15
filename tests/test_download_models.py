@@ -10,7 +10,7 @@ from unittest import mock
 import torch
 from safetensors.torch import save_file
 
-import qwen3_vl.download_models
+import qwen3_vl.download_models as download_models
 from qwen3_vl.download_models import CheckpointVerificationError, verify_checkpoint
 from qwen3_vl.model_catalog import (
     MODEL_SPECS,

@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import qwen3_vl.qwen3_vl
+import qwen3_vl.cli as qwen3_vl
 from qwen3_vl.evaluate_vl import SchemaError, validate_responses
 from qwen3_vl.run_vl_eval import run_manifest
 
@@ -67,7 +67,7 @@ class _Runtime:
 
 class RunManifestTest(unittest.TestCase):
     def test_top_level_cli_dispatches_eval_run(self):
-        with mock.patch("run_vl_eval.main", return_value=19) as runner:
+        with mock.patch("qwen3_vl.run_vl_eval.main", return_value=19) as runner:
             result = qwen3_vl.main(["eval-run", "--manifest", "m", "--output", "o"])
 
         self.assertEqual(result, 19)
