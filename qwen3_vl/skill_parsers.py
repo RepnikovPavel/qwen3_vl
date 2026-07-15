@@ -29,6 +29,113 @@ def parse_grounding_1000(text: str) -> list[dict[str, Any]]:
     return _parse_grounding_1000(text)
 
 
+# Recognised nuScenes-style detection classes (kept in sync with the
+# nuscenes_2d_detection prompt so the auto-label parser can recover the class
+# from prose, not just from strict JSON).
+NUSCENES_CLASSES = (
+    "vehicle", "pedestrian", "cyclist", "traffic_sign", "traffic_light",
+    "barrier", "cone",
+)
+# Common concrete mentions the model writes instead of the canonical class
+# (e.g. "truck", "car", "van" -> "vehicle"); resolved during prose recovery.
+_CLASS_ALIASES = {
+    "car": "vehicle", "truck": "vehicle", "van": "vehicle", "bus": "vehicle",
+    "lorry": "vehicle", "vehicle": "vehicle", "motorcycle": "vehicle",
+    "motorbike": "vehicle", "bicycle": "cyclist", "cyclist": "cyclist",
+    "rider": "cyclist", "person": "pedestrian", "pedestrian": "pedestrian",
+    "people": "pedestrian", "sign": "traffic_sign", "traffic_sign": "traffic_sign",
+    "light": "traffic_light", "traffic_light": "traffic_light",
+    "barrier": "barrier", "guardrail": "barrier", "railing": "barrier",
+    "cone": "cone", "trafficcone": "cone",
+}
+
+
+def _resolve_class(token: str) -> str | None:
+    """Map a free-form token to a canonical nuScenes class, or None."""
+    key = re.sub(r"[^a-z_]", "", token.lower())
+    if key in NUSCENES_CLASSES:
+        return key
+    return _CLASS_ALIASES.get(key)
+
+
+def parse_nuscenes_detection(text: str) -> list[dict[str, Any]]:
+    """2D detection auto-label parser: bboxes + recovered class (0..1000).
+
+    Strict JSON first ({"class": "...", "bbox_2d": [...]}); then falls back to
+    the cookbook grounding parser. If the JSON path produced label-less boxes
+    (or there were none), recover the class for each bbox by scanning a small
+    window of prose around the coordinates for a class mention or alias.
+    """
+    if not text:
+        return []
+    cleaned = _strip_fences(text)
+    out: list[dict[str, Any]] = []
+    # 1. Strict JSON carrying both class and bbox_2d.
+    try:
+        start = cleaned.find("[")
+        end = cleaned.rfind("]")
+        if start != -1 and end > start:
+            data = json.loads(cleaned[start : end + 1])
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict) and "bbox_2d" in item:
+                        cls = item.get("class") or item.get("label")
+                        out.append({
+                            "bbox_2d": list(item["bbox_2d"]),
+                            "label": cls or "object",
+                            "class": _resolve_class(str(cls)) if cls else None,
+                        })
+    except Exception:
+        out = []
+    if out:
+        return out
+    # 2. Fallback to the cookbook grounding parser, then enrich label/class
+    #    from the surrounding prose so callers get useful categories.
+    parsed = _parse_grounding_1000(text)
+    if not parsed:
+        return []
+    # Match each recovered bbox back to a class mentioned near it in the text.
+    bbox_re = re.compile(
+        r"[\(\[]\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*[\)\]]"
+    )
+    spans = [
+        ((int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))), m.span())
+        for m in bbox_re.finditer(text)
+    ]
+    for item in parsed:
+        bbox = item.get("bbox_2d")
+        if not (isinstance(bbox, list) and len(bbox) >= 4):
+            continue
+        key = (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
+        cls = None
+        raw_token = None
+        for coords, (start, end) in spans:
+            if coords != key:
+                continue
+            # Look both before and after the bbox for a class mention.
+            window = text[max(0, start - 60) : min(len(text), end + 40)].lower()
+            # Prefer " - <class>" / "— <class>" trailing the coordinates.
+            trailing = text[end : min(len(text), end + 40)]
+            m = re.search(r"[\-—:]\s*([a-zA-Z_]+)", trailing)
+            if m:
+                resolved = _resolve_class(m.group(1))
+                if resolved:
+                    cls, raw_token = resolved, m.group(1)
+                    break
+            # Otherwise scan the window for any known class or alias.
+            for word in re.findall(r"[a-zA-Z_]+", window):
+                resolved = _resolve_class(word)
+                if resolved:
+                    cls, raw_token = resolved, word
+                    break
+            if cls:
+                break
+        item["label"] = raw_token or cls or item.get("label") or "object"
+        item["class"] = cls
+        out.append(item)
+    return out
+
+
 def _strip_fences(text: str) -> str:
     text = text.strip()
     lines = text.splitlines()
@@ -337,7 +444,7 @@ PARSERS: dict[str, tuple[Callable[[str], Any], int]] = {
     "computer_use": (parse_plain, 1000),
     "mobile_agent": (parse_plain, 999),
     # Auto-labelling skills (driving / nuScenes-style):
-    "nuscenes_2d_detection": (parse_grounding_1000, 1000),
+    "nuscenes_2d_detection": (parse_nuscenes_detection, 1000),
     "nuscenes_lane": (parse_lane, 1000),
     "nuscenes_scene_graph": (parse_scene_graph, 0),
     "nuscenes_drivable_area": (parse_drivable_area, 1000),

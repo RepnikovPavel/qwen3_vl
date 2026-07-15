@@ -155,9 +155,9 @@ class DrivableAreaParserTest(unittest.TestCase):
 
 
 class DetectionParserTest(unittest.TestCase):
-    """2D detection reuses parse_grounding_1000; sanity-check the wiring."""
+    """2D detection parser: strict JSON, then prose recovery with class."""
 
-    def test_strict_json_bboxes_parse(self):
+    def test_strict_json_bboxes_parse_with_class(self):
         text = (
             '[{"class": "vehicle", "bbox_2d": [65, 245, 345, 675]}, '
             '{"class": "pedestrian", "bbox_2d": [365, 485, 405, 635]}]'
@@ -165,13 +165,40 @@ class DetectionParserTest(unittest.TestCase):
         parsed = parse_skill("nuscenes_2d_detection", text)
         self.assertEqual(len(parsed), 2)
         self.assertEqual(parsed[0]["bbox_2d"], [65, 245, 345, 675])
+        self.assertEqual(parsed[0]["class"], "vehicle")
+        self.assertEqual(parsed[1]["class"], "pedestrian")
 
-    def test_inline_bbox_prose_recovery(self):
-        # The 2B model frequently writes "[x1, y1, x2, y2] - class" in prose.
+    def test_inline_bbox_prose_recovers_canonical_class(self):
+        # The 2B Thinking model writes "<subject>: [x1,y1,x2,y2] - <class>".
+        # Aliases (truck/car -> vehicle) must resolve to the canonical class.
+        text = (
+            "The truck: [65, 245, 345, 675] - vehicle.\n"
+            "White van: [425, 500, 475, 580] - vehicle.\n"
+            "Pedestrian: [365, 485, 405, 635] - pedestrian.\n"
+            "Barrier: [675, 555, 725, 660] - barrier."
+        )
+        parsed = parse_skill("nuscenes_2d_detection", text)
+        self.assertEqual(len(parsed), 4)
+        classes = [item["class"] for item in parsed]
+        self.assertEqual(classes, ["vehicle", "vehicle", "pedestrian", "barrier"])
+        # The label keeps the human-readable mention; class is canonical.
+        self.assertEqual(parsed[0]["label"], "vehicle")
+
+    def test_alias_resolution_truck_car_become_vehicle(self):
+        # No trailing "- class": the parser must still pull the class from the
+        # window around the bbox ("truck at [...]").
         text = "I see a truck at [65, 245, 345, 675] and a car at [625, 525, 665, 580]."
         parsed = parse_skill("nuscenes_2d_detection", text)
         self.assertGreaterEqual(len(parsed), 2)
-        self.assertIn("bbox_2d", parsed[0])
+        self.assertEqual(parsed[0]["class"], "vehicle")
+        self.assertEqual(parsed[1]["class"], "vehicle")
+
+    def test_em_dash_separator_is_recognised(self):
+        # The model often uses an em dash (U+2014), not a hyphen.
+        text = "Truck: [65, 245, 345, 675] — vehicle."
+        parsed = parse_skill("nuscenes_2d_detection", text)
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["class"], "vehicle")
 
 
 if __name__ == "__main__":
