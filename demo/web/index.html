@@ -416,9 +416,22 @@ function _paintOverlays(ov, alpha) {
     } else if (item.kind === "point" && pts.length >= 1) {
       const [x,y] = pts[0]; const r = Math.round(W * 0.008);
       viewer.ctx.beginPath(); viewer.ctx.arc(x, y, r, 0, 2*Math.PI); viewer.ctx.fill();
+    } else if (item.kind === "line" && pts.length >= 2) {
+      // open polyline (lane)
+      viewer.ctx.beginPath();
+      viewer.ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let k = 1; k < pts.length; k++) viewer.ctx.lineTo(pts[k][0], pts[k][1]);
+      viewer.ctx.stroke();
     } else if (item.kind === "poly" && pts.length >= 2) {
       viewer.ctx.beginPath();
-      EDGES3D.forEach(([a,b]) => { if (pts[a] && pts[b]) { viewer.ctx.moveTo(pts[a][0],pts[a][1]); viewer.ctx.lineTo(pts[b][0],pts[b][1]); } });
+      // closed polygon (drivable area) if many points; 3D wireframe if 8 corners
+      if (pts.length === 8) {
+        EDGES3D.forEach(([a,b]) => { if (pts[a] && pts[b]) { viewer.ctx.moveTo(pts[a][0],pts[a][1]); viewer.ctx.lineTo(pts[b][0],pts[b][1]); } });
+      } else {
+        viewer.ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let k = 1; k < pts.length; k++) viewer.ctx.lineTo(pts[k][0], pts[k][1]);
+        viewer.ctx.closePath();
+      }
       viewer.ctx.stroke();
     }
     if (item.label) {

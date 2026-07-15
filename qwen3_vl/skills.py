@@ -102,7 +102,7 @@ DESCRIBE = SkillSpec(
     output_kind="text",
     frames_kind="single_image",
     coord_scale=0,
-    default_max_new_tokens=1024,
+    default_max_new_tokens=4096,
 )
 
 OCR = SkillSpec(
@@ -202,7 +202,7 @@ SPATIAL_UNDERSTANDING = SkillSpec(
     output_kind="grounding_2d",
     frames_kind="single_image",
     coord_scale=1000,
-    default_max_new_tokens=1024,
+    default_max_new_tokens=4096,
 )
 
 THINK_DETAILED = SkillSpec(
@@ -224,13 +224,15 @@ OMNI_RECOGNITION = SkillSpec(
     label="Omni recognition",
     cookbook="omni_recognition.ipynb",
     prompt=(
-        "Identify the main subjects in the image and return their bounding box "
-        "and name in JSON format."
+        "Identify every main subject in the image and return each with its "
+        "bounding box and name in JSON format. Think step by step: scan the "
+        "whole image, reason about each subject and its precise box, then "
+        "output the JSON array."
     ),
     output_kind="grounding_2d",
     frames_kind="single_image",
     coord_scale=1000,
-    default_max_new_tokens=1024,
+    default_max_new_tokens=4096,
 )
 
 # --- Grounding (verbatim cookbook prompts) -----------------------------------
@@ -377,8 +379,11 @@ NUSCENES_2D_DETECTION = SkillSpec(
         "traffic_light, barrier, cone. "
         'Output a JSON array, each item {"class": "...", "bbox_2d": '
         "[x1, y1, x2, y2]} with integer coordinates in [0, 1000] relative to "
-        "image width/height (x grows right, y grows down). Keep reasoning "
-        "short. Begin the final answer with [ and end with ]."
+        "image width/height (x grows right, y grows down). "
+        "Think step by step: scan the image systematically left-to-right and "
+        "front-to-back, reason carefully about every candidate object, its "
+        "class, and its precise bounding box, before the final JSON. "
+        "Begin the final answer with [ and end with ]."
     ),
     output_kind="grounding_2d",
     frames_kind="single_image",
@@ -400,8 +405,10 @@ NUSCENES_LANE = SkillSpec(
         "[[x, y], ...]} with integer coordinates in [0, 1000] relative to "
         "image width/height, ordered from the bottom of the image (nearest) "
         "to the top (farthest). Use one lane_id per visible lane (ego lane, "
-        "left neighbour, right neighbour, ...). Keep reasoning short. Begin "
-        "the final answer with [ and end with ]."
+        "left neighbour, right neighbour, ...). "
+        "Think step by step: identify each lane marking, follow it from near "
+        "to far, and reason about its pixel coordinates before the final JSON. "
+        "Begin the final answer with [ and end with ]."
     ),
     output_kind="lane",
     frames_kind="single_image",
@@ -423,7 +430,9 @@ NUSCENES_SCENE_GRAPH = SkillSpec(
         'Output a JSON array of triples {"subject": "...", "relation": "...", '
         '"object": "..."} with relations drawn from: left_of, right_of, '
         "ahead_of, behind, on, next_to, crossing, same_lane_as, parked. "
-        "Keep reasoning short. Begin the final answer with [ and end with ]."
+        "Think step by step: enumerate every node, reason about each pairwise "
+        "spatial relation carefully, then emit the full triple list. "
+        "Begin the final answer with [ and end with ]."
     ),
     output_kind="scene_graph",
     frames_kind="single_image",
@@ -445,8 +454,10 @@ NUSCENES_DRIVABLE_AREA = SkillSpec(
         'Output a JSON object {"polygon": [[x, y], ...]} with integer '
         "coordinates in [0, 1000] relative to image width/height, ordered "
         "clockwise and covering both the near and far road. Exclude sidewalks, "
-        "barriers and other vehicles. Keep reasoning short. Begin the final "
-        'answer with { and end with }.'
+        "barriers and other vehicles. "
+        "Think step by step: trace the road boundary from near to far on both "
+        "sides, reason about each polygon vertex, then emit the closed polygon. "
+        "Begin the final answer with { and end with }."
     ),
     output_kind="drivable_area",
     frames_kind="single_image",

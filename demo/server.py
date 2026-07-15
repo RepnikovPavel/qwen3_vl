@@ -443,6 +443,7 @@ async def _save_uploads(
 _COORD_SKILLS = {
     "2d_grounding", "3d_grounding", "spatial_understanding",
     "omni_recognition", "ocr_spotting", "computer_use", "mobile_agent",
+    "nuscenes_2d_detection", "nuscenes_lane", "nuscenes_drivable_area",
 }
 
 
@@ -518,6 +519,42 @@ def _build_skill_overlays(
                 "label": item.get("label", ""),
                 "extra": {"bbox_3d": list(bbox_3d)},
             })
+        return overlays, image_size
+
+    if skill_key == "nuscenes_lane":
+        # Lanes: {"lane_id": int, "points": [[x,y],...]}. Draw as open polyline.
+        for item in parsed:
+            pts = item.get("points") or []
+            if not isinstance(pts, list) or len(pts) < 2:
+                continue
+            norm = []
+            for p in pts:
+                if isinstance(p, (list, tuple)) and len(p) >= 2:
+                    norm.append([float(p[0]) / scale, float(p[1]) / scale])
+            if len(norm) >= 2:
+                overlays.append({
+                    "kind": "line", "pts": norm,
+                    "label": f"lane {item.get('lane_id', '')}",
+                    "extra": {"lane_id": item.get("lane_id")},
+                })
+        return overlays, image_size
+
+    if skill_key == "nuscenes_drivable_area":
+        # Drivable area: polygon points. Draw as filled-ish poly outline.
+        for item in parsed:
+            pts = item.get("points") or item.get("polygon") or []
+            if not isinstance(pts, list) or len(pts) < 3:
+                continue
+            norm = []
+            for p in pts:
+                if isinstance(p, (list, tuple)) and len(p) >= 2:
+                    norm.append([float(p[0]) / scale, float(p[1]) / scale])
+            if len(norm) >= 3:
+                overlays.append({
+                    "kind": "poly", "pts": norm,
+                    "label": item.get("label", "drivable"),
+                    "extra": {},
+                })
         return overlays, image_size
 
     # 2D / point skills: bbox_2d [x1,y1,x2,y2] or point_2d [x,y], scale 0..N.
@@ -1026,6 +1063,16 @@ def create_app(
         try:
             session_lock = session_chat_locks.setdefault(session_id, asyncio.Lock())
             async with session_lock:
+                # If a skill is selected and the user did not type a custom
+                # prompt, fall back to the skill's cookbook prompt so the model
+                # hits its trained output distribution.
+                if skill and not (custom_prompt or "").strip():
+                    try:
+                        from qwen3_vl.skills import get_skill
+
+                        custom_prompt = get_skill(skill).prompt
+                    except Exception:
+                        pass
                 resolved = resolve_task(
                     task,
                     custom_prompt=custom_prompt,

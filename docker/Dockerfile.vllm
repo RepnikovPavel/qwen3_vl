@@ -1,0 +1,29 @@
+# vLLM server for Qwen3-VL FP8 on CUDA 12.4 (compatible with driver 565 / CUDA 12.7).
+# Built from a CUDA 12.4 runtime base; vLLM installed via pip wheels.
+# Target: max GPU utilization on x2 RTX 4090 via continuous batching + tensor parallel.
+#
+# Build:  docker build -t qwen3-vllm:cu124 -f docker/Dockerfile.vllm .
+# Run:    see scripts/launch_vllm_gr2.sh
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HUB_OFFLINE=1
+
+# Ubuntu 22.04 ships python3.10; vLLM 0.11 wheels support 3.9-3.12.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-dev \
+        git curl libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3 /usr/bin/python
+
+RUN pip3 install --upgrade pip wheel setuptools && \
+    pip3 install vllm "transformers>=4.56" \
+    accelerate sentencepiece fastapi uvicorn pillow decord
+
+# Fail fast at build time if the install is broken.
+RUN python3 -c "import vllm; print('vllm', vllm.__version__)"
+
+WORKDIR /workspace
+EXPOSE 8000
