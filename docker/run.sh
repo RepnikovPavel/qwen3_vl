@@ -279,24 +279,22 @@ case "${mode}" in
         )
         ;;
     web)
+        # Legacy Web UI mode. web_ui.py was removed in 4cf5908 (replaced by
+        # demo/server.py); keep the `web` entry point as a thin alias so old
+        # runbooks still work. Prefer the `demo` mode for persistent state.
         docker_args+=(
             --network=bridge
             --gpus "${gpu_request}"
             --publish "127.0.0.1:${host_port}:7860/tcp"
+            --env CKPTDIR=/models
+            --env PORT=7860
             --env QWEN3_WEB_PORT=7860
+            --env PYTORCH_ALLOC_CONF=expandable_segments:True
             --mount "type=bind,src=${models_dir},dst=/models,readonly"
             --mount "type=bind,src=${data_dir},dst=/data,readonly"
             "${offline_env[@]}"
         )
-        container_command=(
-            python3 web_ui.py
-            "${app_args[@]}"
-            --device cuda
-            --ckpt-dir /models
-            --kernel-dir "${kernel_dir}"
-            --host 0.0.0.0
-            --port 7860
-        )
+        container_command=(python3 -m demo.server)
         ;;
     demo)
         state_dir="${QWEN3_STATE:-}"
