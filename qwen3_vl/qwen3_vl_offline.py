@@ -93,6 +93,12 @@ from transformers import (
 )
 from transformers.integrations.finegrained_fp8 import FP8Linear
 
+from .cuda_compat import (
+    BACKEND_TORCH_FP32,
+    detect_cuda_stack,
+    disable_deepgemm_hub_lookup,
+    select_fp8_backend,
+)
 from .model_catalog import MODEL_SPECS, get_model_spec, normalize_model_size
 from .download_models import verify_checkpoint
 from .parity import fingerprint_tensors, token_ids_sha256
@@ -352,8 +358,16 @@ def inject_local_fp8_kernel(kernel_dir: Path) -> ModuleType:
 
     hub_kernels._KERNEL_MODULE_MAPPING["finegrained-fp8"] = module
     hf_fp8._triton_available = None
-    # Never attempt a DeepGEMM Hub lookup. The local Triton kernel works on SM89+.
-    hf_fp8._deepgemm_available = False
+    # ─────────────────────────────────────────────────────────────────────
+    # CUDA 12 / CUDA 13: DeepGEMM is a Hopper-only (sm_90) FP8 matmul that
+    # needs CUDA runtime 12.3+. On Ada (sm_89, CUDA 12) and Blackwell
+    # (sm_120, CUDA 13) it would crash, and even on Hopper the deployed
+    # kernels package does not yet expose a working build — so we pin
+    # transformers' finegrained-fp8 integration to the local Triton kernel
+    # on every supported stack. disable_deepgemm_hub_lookup() lives in
+    # qwen3_vl/cuda_compat.py; flip it there when a DeepGEMM build ships.
+    # ─────────────────────────────────────────────────────────────────────
+    disable_deepgemm_hub_lookup()
     hf_fp8._load_triton_kernel()
     return module
 
@@ -718,20 +732,28 @@ class Qwen3VLRuntime:
             threads = cpu_threads or min(os.cpu_count() or 1, 16)
             torch.set_num_threads(threads)
             self.kernel_dir = None
-            self.compute_backend = "torch_fp32"
+            self.compute_backend = BACKEND_TORCH_FP32
         else:
             if not torch.cuda.is_available():
                 raise RuntimeError("CUDA is not available")
-            capabilities = [
-                torch.cuda.get_device_capability(index)
-                for index in range(torch.cuda.device_count())
-            ]
+            # ──────────────────────────────────────────────────────────────
+            # CUDA 12 vs CUDA 13 detection (see qwen3_vl/cuda_compat.py).
+            # The service deploys on either stack:
+            #   * CUDA 12 — Ada (sm_89, RTX 4090) on driver 535–565.
+            #   * CUDA 13 — Hopper (sm_90) / Blackwell (sm_120, RTX 5060 Ti)
+            #               on driver 575+.
+            # FP8 needs >= sm_89 on both; backend selection is centralised in
+            # select_fp8_backend() so this branch stays readable.
+            # ──────────────────────────────────────────────────────────────
+            cuda_stack = detect_cuda_stack()
+            capabilities = list(cuda_stack.capabilities)
             unsupported = [value for value in capabilities if value < (8, 9)]
             if unsupported:
                 raise RuntimeError(
                     "native fine-grained FP8 requires compute capability >= 8.9; "
-                    f"got {capabilities}"
+                    f"got {capabilities} (stack={cuda_stack.label})"
                 )
+            self.compute_backend = select_fp8_backend(tuple(capabilities))
             self.kernel_dir = resolve_local_kernel_dir(kernel_dir)
             try:
                 inject_local_fp8_kernel(self.kernel_dir)
