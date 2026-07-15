@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from evaluate_vl import (
+from qwen3_vl.evaluate_vl import (
     SchemaError,
     _evaluate_chart,
     _evaluate_formula,

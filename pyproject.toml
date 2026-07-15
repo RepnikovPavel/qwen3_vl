@@ -10,10 +10,13 @@ requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
-qwen3-vl = "qwen3_vl:main"
+# The implementation moved to the ``qwen3_vl`` package; the console entry
+# point dispatches to qwen3_vl.cli:main. Root-level shim modules keep
+# `python3 benchmark.py` / `from skills import ...` working too.
+qwen3-vl = "qwen3_vl.cli:main"
 
 [tool.setuptools]
-packages = ["demo"]
+packages = ["qwen3_vl", "demo"]
 py-modules = [
   "benchmark",
   "cache_fp8_kernel",
@@ -21,14 +24,19 @@ py-modules = [
   "download_models",
   "evaluate_vl",
   "generate_eval_fixtures",
+  "human_size",
   "model_catalog",
-  "qwen3_vl",
-  "qwen3_vl_offline",
   "parity",
+  "qwen3_vl_offline",
   "reference_vl",
+  "run_cpu_offline",
+  "run_gpu_fp8_offline",
+  "run_skill",
   "run_vl_eval",
-  "web_ui",
+  "skill_parsers",
+  "skills",
 ]
 
 [tool.setuptools.package-data]
 demo = ["web/*.html"]
+qwen3_vl = []

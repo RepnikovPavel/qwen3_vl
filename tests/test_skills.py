@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from skills import (
+from qwen3_vl.skills import (
     SKILLS,
     SkillError,
     SkillSpec,
@@ -12,7 +12,7 @@ from skills import (
     public_skills,
     resolve_skill,
 )
-from skill_parsers import coord_scale, parse_skill
+from qwen3_vl.skill_parsers import coord_scale, parse_skill
 
 
 class SkillCatalogTest(unittest.TestCase):

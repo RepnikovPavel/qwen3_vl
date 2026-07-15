@@ -106,7 +106,7 @@ class LongGenerationMemoryTest(unittest.TestCase):
             self.skipTest("Test requires at least 2 GPUs to target 48GB total")
 
         try:
-            from qwen3_vl_offline import Qwen3VLRuntime
+            from qwen3_vl.qwen3_vl_offline import Qwen3VLRuntime
         except Exception:
             self.skipTest("Qwen3VLRuntime not importable in this env")
 

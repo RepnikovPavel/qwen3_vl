@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import unittest
 
-from skills import SKILLS, SkillSpec, get_skill, resolve_skill
-from skill_parsers import coord_scale, parse_skill
+from qwen3_vl.skills import SKILLS, SkillSpec, get_skill, resolve_skill
+from qwen3_vl.skill_parsers import coord_scale, parse_skill
 
 
 AUTOLABEL_KEYS = (

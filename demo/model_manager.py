@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from model_catalog import (
+from qwen3_vl.model_catalog import (
     MODEL_SPECS,
     default_snapshot_path,
     get_model_spec,
@@ -153,7 +153,7 @@ def _gpu_processes() -> list[dict[str, Any]]:
     except (OSError, subprocess.SubprocessError):
         return []
 
-    from human_size import mib_to_bytes
+    from qwen3_vl.human_size import mib_to_bytes
 
     procs: list[dict[str, Any]] = []
     for line in out:
@@ -344,7 +344,7 @@ class DemoModelManager:
                 self._last_used = time.monotonic()
                 return self._runtime
         if self._runtime_factory is None:
-            from download_models import verify_checkpoint
+            from qwen3_vl.download_models import verify_checkpoint
 
             verify_checkpoint(
                 default_snapshot_path(self.ckpt_dir, model_key),
@@ -357,7 +357,7 @@ class DemoModelManager:
         try:
             factory = self._runtime_factory
             if factory is None:
-                from qwen3_vl_offline import Qwen3VLRuntime
+                from qwen3_vl.qwen3_vl_offline import Qwen3VLRuntime
 
                 factory = Qwen3VLRuntime
             runtime = factory(
@@ -396,7 +396,7 @@ class DemoModelManager:
                 )
             )
         try:
-            from download_models import verify_checkpoint
+            from qwen3_vl.download_models import verify_checkpoint
 
             verify_checkpoint(path, spec=get_model_spec(model_key), full=False)
             return True

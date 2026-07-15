@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from model_catalog import (
+from qwen3_vl.model_catalog import (
     MODEL_SPECS,
     default_snapshot_path,
     get_model_spec,

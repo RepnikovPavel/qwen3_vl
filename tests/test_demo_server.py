@@ -15,7 +15,7 @@ from demo.generation import DemoGenerationResult
 from demo.model_manager import DemoModelManager
 from demo.server import create_app
 from demo.sessions import SessionStore
-from model_catalog import MODEL_SPECS, default_snapshot_path
+from qwen3_vl.model_catalog import MODEL_SPECS, default_snapshot_path
 
 
 def _result(

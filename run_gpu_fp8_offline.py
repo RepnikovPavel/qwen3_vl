@@ -1,16 +1,18 @@
-#!/usr/bin/env python3
-"""GPU performance path: native FP8 text layers plus BF16 vision layers."""
+"""DEPRECATED root shim — the implementation moved to the ``qwen3_vl``
+package. This file exists for backward compatibility with ``docker/run.sh``,
+the ``qwen3-vl`` console script, and any external ``import <name>``.
+New code should import from ``qwen3_vl.<name>`` directly.
+"""
 
-import os
+from __future__ import annotations
+
+import qwen3_vl.run_gpu_fp8_offline as _impl  # noqa: F401
+
+# Re-export every public name for `from <shim> import X` callers.
+__all__ = [n for n in dir(_impl) if not n.startswith('_')]  # type: ignore[list-item]
+globals().update({n: getattr(_impl, n) for n in __all__})
 
 
-# Set offline mode before importing the shared runner (and thus Transformers).
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ["HF_DATASETS_OFFLINE"] = "1"
-
-from qwen3_vl_offline import main
-
-
-if __name__ == "__main__":
-    raise SystemExit(main("cuda"))
+if __name__ == '__main__':
+    import sys as _sys
+    raise SystemExit(_impl.main(_sys.argv[1:]))

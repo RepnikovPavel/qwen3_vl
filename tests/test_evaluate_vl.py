@@ -5,8 +5,8 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 
-from evaluate_vl import SchemaError, evaluate
-from generate_eval_fixtures import generate_fixtures
+from qwen3_vl.evaluate_vl import SchemaError, evaluate
+from qwen3_vl.generate_eval_fixtures import generate_fixtures
 
 
 def _read_json(path: Path):

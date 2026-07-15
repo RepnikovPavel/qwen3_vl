@@ -30,7 +30,7 @@ Run `qwen3-vl COMMAND --help` for command-specific options.
 def _models(argv: Sequence[str]) -> int:
     if argv and argv != ["--json"]:
         raise SystemExit("models accepts only --json")
-    from model_catalog import MODEL_SPECS
+    from .model_catalog import MODEL_SPECS
 
     rows = [
         {
@@ -59,7 +59,7 @@ def _models(argv: Sequence[str]) -> int:
 def _skills(argv: Sequence[str]) -> int:
     if argv and argv != ["--json"]:
         raise SystemExit("skills accepts only --json")
-    from skills import public_skills
+    from .skills import public_skills
 
     payload = public_skills()
     if argv == ["--json"]:
@@ -86,17 +86,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     if command == "skills":
         return _skills(rest)
     if command in {"download", "verify"}:
-        from download_models import main as download_main
+        from .download_models import main as download_main
 
         if command == "verify":
             rest.append("--verify-only")
         return download_main(rest)
     if command == "infer":
-        from qwen3_vl_offline import main as infer_main
+        from .qwen3_vl_offline import main as infer_main
 
         return infer_main(None, rest)
     if command == "skill":
-        from run_skill import main as skill_main
+        from .run_skill import main as skill_main
 
         return skill_main(rest)
     if command == "web":
@@ -104,19 +104,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         return run_main(rest)
     if command == "benchmark":
-        from benchmark import main as benchmark_main
+        from .benchmark import main as benchmark_main
 
         return benchmark_main(rest)
     if command == "eval-run":
-        from run_vl_eval import main as eval_run_main
+        from .run_vl_eval import main as eval_run_main
 
         return eval_run_main(rest)
     if command == "parity-run":
-        from reference_vl import main as parity_main
+        from .reference_vl import main as parity_main
 
         return parity_main(rest)
     if command in {"sweep-context", "context-sweep"}:
-        from context_sweep import main as sweep_main
+        from .context_sweep import main as sweep_main
 
         return sweep_main(rest)
 

@@ -8,8 +8,8 @@ import torch
 from PIL import Image
 from transformers import AutoProcessor
 
-from model_catalog import get_model_spec
-from qwen3_vl_offline import (
+from qwen3_vl.model_catalog import get_model_spec
+from qwen3_vl.qwen3_vl_offline import (
     DEFAULT_CKPT_DIR,
     MediaItem,
     NATIVE_CONTEXT_TOKENS,

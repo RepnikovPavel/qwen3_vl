@@ -3,9 +3,9 @@ from types import SimpleNamespace
 
 import torch
 
-from parity import build_parity_artifact, compare_artifacts, token_ids_sha256
-from qwen3_vl_offline import MediaItem, generate
-from reference_vl import (
+from qwen3_vl.parity import build_parity_artifact, compare_artifacts, token_ids_sha256
+from qwen3_vl.qwen3_vl_offline import MediaItem, generate
+from qwen3_vl.reference_vl import (
     _candidate_artifact,
     _finish_reason,
     _reference_generate,

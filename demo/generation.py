@@ -109,7 +109,7 @@ def run_streaming_generation(
         TextIteratorStreamer,
     )
 
-    from qwen3_vl_offline import (
+    from qwen3_vl.qwen3_vl_offline import (
         FiniteLogitsProcessor,
         _split_reasoning,
         build_messages,

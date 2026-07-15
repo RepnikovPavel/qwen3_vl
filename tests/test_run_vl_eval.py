@@ -6,9 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import qwen3_vl
-from evaluate_vl import SchemaError, validate_responses
-from run_vl_eval import run_manifest
+import qwen3_vl.qwen3_vl
+from qwen3_vl.evaluate_vl import SchemaError, validate_responses
+from qwen3_vl.run_vl_eval import run_manifest
 
 
 def _chart_truth(title):

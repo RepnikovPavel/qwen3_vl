@@ -30,7 +30,7 @@ from demo.tasks import (
     public_presets,
     resolve_task,
 )
-from model_catalog import normalize_model_size
+from qwen3_vl.model_catalog import normalize_model_size
 
 
 MAX_UPLOAD_BYTES = 128 * 1024 * 1024
@@ -461,8 +461,8 @@ def _build_skill_overlays(
     can draw them at any zoom level. For 3D, bbox_3d is projected via camera
     intrinsics (fov=60 fallback, like the cookbook) then normalized.
     """
-    from skills import SKILLS
-    from skill_parsers import parse_skill
+    from qwen3_vl.skills import SKILLS
+    from qwen3_vl.skill_parsers import parse_skill
 
     if skill_key not in _COORD_SKILLS:
         return None, None
@@ -624,7 +624,7 @@ def create_app(
 
     @app.get("/api/skills")
     def skills():
-        from skills import public_skills
+        from qwen3_vl.skills import public_skills
 
         return public_skills()
 
@@ -841,7 +841,7 @@ def create_app(
             media = rt.prepare_media([("image", str(tmp_path))], max_image_side)
 
             # Build a minimal chat turn (same as regular path)
-            from qwen3_vl_offline import build_messages  # type: ignore
+            from qwen3_vl.qwen3_vl_offline import build_messages  # type: ignore
 
             messages = build_messages(media, prompt, [], None)
             inputs = rt.processor.apply_chat_template(
@@ -957,7 +957,7 @@ def create_app(
         try:
             media = rt.prepare_media([("image", str(tmp_path))], max_image_side)
 
-            from qwen3_vl_offline import build_messages  # type: ignore
+            from qwen3_vl.qwen3_vl_offline import build_messages  # type: ignore
             messages = build_messages(media, prompt, [], None)
             inputs = rt.processor.apply_chat_template(
                 messages, tokenize=True, add_generation_prompt=True,

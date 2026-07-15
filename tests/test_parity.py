@@ -8,7 +8,7 @@ from pathlib import Path
 
 import torch
 
-from parity import (
+from qwen3_vl.parity import (
     INPUT_TENSOR_NAMES,
     TOKEN_ENCODING,
     build_parity_artifact,

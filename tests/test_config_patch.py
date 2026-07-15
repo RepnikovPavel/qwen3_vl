@@ -2,12 +2,12 @@ import json
 import unittest
 from pathlib import Path
 
-from qwen3_vl_offline import (
+from qwen3_vl.qwen3_vl_offline import (
     DEFAULT_CKPT_DIR,
     load_patched_config,
     validate_checkpoint,
 )
-from model_catalog import get_model_spec
+from qwen3_vl.model_catalog import get_model_spec
 
 
 MODEL_PATH = DEFAULT_CKPT_DIR / get_model_spec("2b").cache_name / "snapshots" / "main"
