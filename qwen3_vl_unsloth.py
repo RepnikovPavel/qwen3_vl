@@ -121,6 +121,12 @@ def load_source_runtime(
     The ``Qwen3VLRuntime`` accepts an explicit ``model_path`` that overrides
     the catalog default — we point it at the chosen snapshot so the same
     runtime code loads either source.
+
+    The official Qwen/ snapshot goes through the full catalog manifest
+    verification. The unsloth/ snapshot carries byte-identical weights but a
+    patched config/tokenizer (different sizes), so it would fail the
+    Qwen-pinned manifest; we pass ``trust_remote_source=True`` to load it
+    through the same FP8 runtime without that check.
     """
     from qwen3_vl.qwen3_vl_offline import Qwen3VLRuntime
 
@@ -142,6 +148,8 @@ def load_source_runtime(
         kernel_dir=kernel_dir,
         seed=seed,
         gpu_placement=gpu_placement,
+        # unsloth repackages differ only in metadata; weights are identical.
+        trust_remote_source=(source != "official"),
     )
 
 

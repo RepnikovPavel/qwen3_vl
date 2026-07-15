@@ -100,7 +100,7 @@ from .cuda_compat import (
     select_fp8_backend,
 )
 from .model_catalog import MODEL_SPECS, get_model_spec, normalize_model_size
-from .download_models import verify_checkpoint
+from .download_models import inspect_remote_checkpoint, verify_checkpoint
 from .parity import fingerprint_tensors, token_ids_sha256
 
 
@@ -704,6 +704,7 @@ class Qwen3VLRuntime:
         verify_sha: bool = False,
         yarn_1m: bool = False,
         gpu_placement: str = "single",
+        trust_remote_source: bool = False,
     ):
         if device not in {"cpu", "cuda"}:
             raise ValueError(f"unsupported device: {device}")
@@ -713,9 +714,22 @@ class Qwen3VLRuntime:
         self.spec = get_model_spec(self.model_size)
         self.device = device
         self.model_path = resolve_model_path(model_path, ckpt_dir, self.model_size)
-        self.checkpoint = validate_checkpoint(
-            self.model_path, self.model_size, full=verify_sha
-        )
+        # Catalog validation enforces the pinned file sizes/SHAs of the
+        # official Qwen/ checkpoint. Third-party repackages (e.g. unsloth/)
+        # carry byte-identical weights but patched metadata files, so they
+        # fail the manifest check. ``trust_remote_source`` opts out of that
+        # check for an explicit cross-source comparison while still loading
+        # through the same FP8 runtime.
+        if trust_remote_source:
+            # inspect_remote_checkpoint reads model.safetensors.index.json to
+            # count tensors/scales/shards without comparing against the
+            # Qwen-pinned catalog manifest — safe because the trusted source
+            # (e.g. unsloth/) shares byte-identical weights.
+            self.checkpoint = inspect_remote_checkpoint(self.model_path)
+        else:
+            self.checkpoint = validate_checkpoint(
+                self.model_path, self.model_size, full=verify_sha
+            )
         self.config = load_patched_config(self.model_path, device)
         if yarn_1m:
             enable_official_yarn_1m(self.config)

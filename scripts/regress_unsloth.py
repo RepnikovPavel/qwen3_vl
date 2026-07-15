@@ -59,17 +59,21 @@ DEFAULT_PROMPTS = (
 )
 
 
-def _run_one(source: str, snapshot: Path, prompt_id: str, prompt: str, args) -> dict:
+def _run_one(source: str, snapshot: Path, prompt_id: str, prompt: str, size: str, args) -> dict:
     """Run one inference and return a comparable record."""
     from qwen3_vl.qwen3_vl_offline import Qwen3VLRuntime
 
     runtime = Qwen3VLRuntime(
-        model_size=args.size,
+        model_size=size,
         model_path=str(snapshot),
         ckpt_dir=args.ckpt_dir,
         kernel_dir=args.kernel_dir,
         seed=args.seed,
         gpu_placement=args.gpu_placement,
+        # unsloth repackages carry identical weights but patched metadata, so
+        # they fail the Qwen-pinned catalog manifest; trust the remote source
+        # for this explicit cross-source comparison.
+        trust_remote_source=(source != "official"),
     )
     result, _media = runtime.infer(
         media_inputs=[("image", args.image)],
@@ -118,8 +122,8 @@ def _compare_pair(pair, prompts, args) -> dict:
     all_match = True
     for prompt_id, prompt in prompts:
         try:
-            off = _run_one("official", off_dir, prompt_id, prompt, args)
-            uns = _run_one("unsloth", uns_dir, prompt_id, prompt, args)
+            off = _run_one("official", off_dir, prompt_id, prompt, pair.size, args)
+            uns = _run_one("unsloth", uns_dir, prompt_id, prompt, pair.size, args)
         except Exception as exc:  # noqa: BLE001 — surface any per-run failure
             row["prompts"].append({
                 "prompt_id": prompt_id, "error": f"{type(exc).__name__}: {exc}",
