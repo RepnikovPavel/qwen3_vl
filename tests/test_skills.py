@@ -28,9 +28,9 @@ class SkillCatalogTest(unittest.TestCase):
             "spatial_understanding", "think_detailed", "omni_recognition",
             "2d_grounding", "3d_grounding", "video_understanding",
             "long_document", "mmcode", "computer_use", "mobile_agent",
-            # Auto-labelling skills (driving / nuScenes-style):
-            "nuscenes_2d_detection", "nuscenes_lane",
-            "nuscenes_scene_graph", "nuscenes_drivable_area",
+            # General driving-scene auto-labelling skills:
+            "detection_2d", "lane_polyline",
+            "scene_graph", "drivable_area",
         }
         self.assertEqual(set(SKILLS), expected)
 
@@ -61,11 +61,33 @@ class SkillCatalogTest(unittest.TestCase):
     def test_public_skills_schema(self):
         payload = public_skills()
         self.assertEqual(payload["schema_version"], 1)
-        self.assertEqual(len(payload["skills"]), len(SKILLS))
+        # Only verified skills are public by default; drafts are hidden.
+        verified_keys = {k for k, s in SKILLS.items() if s.status == "verified"}
+        self.assertEqual({item["key"] for item in payload["skills"]}, verified_keys)
+        self.assertGreater(len(payload["skills"]), 0)
         for item in payload["skills"]:
             self.assertIn("key", item)
             self.assertIn("prompt", item)
             self.assertIn("output_kind", item)
+            self.assertEqual(item["status"], "verified")
+
+    def test_public_skills_hides_drafts_by_default(self):
+        draft_keys = {k for k, s in SKILLS.items() if s.status == "draft"}
+        self.assertGreater(len(draft_keys), 0, "fixture: at least one draft skill expected")
+        public = {item["key"] for item in public_skills()["skills"]}
+        self.assertFalse(public & draft_keys, f"draft skills leaked into public catalog: {public & draft_keys}")
+
+    def test_public_skills_include_draft_exposes_all(self):
+        with_draft = public_skills(include_draft=True)
+        self.assertEqual({item["key"] for item in with_draft["skills"]}, set(SKILLS))
+
+    def test_get_skill_resolves_draft(self):
+        # Draft skills are hidden from the public catalog but still resolvable
+        # (the CLI / e2e tests iterate on them).
+        for key, spec in SKILLS.items():
+            if spec.status == "draft":
+                self.assertIs(get_skill(key), spec)
+                break
 
     def test_resolve_skill_custom_prompt_for_accepts_custom(self):
         resolved = resolve_skill("2d_grounding", custom_prompt="find all bicycles")

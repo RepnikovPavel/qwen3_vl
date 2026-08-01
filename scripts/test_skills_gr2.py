@@ -34,9 +34,9 @@ COORD_SKILLS = [
     ("spatial_understanding", 'Locate the road surface ahead. Output point coordinates in JSON.', "point"),
     ("omni_recognition", 'Identify vehicles and return their bounding boxes in JSON.', "box"),
     ("ocr_spotting", 'Spot all text in the image; output JSON with bbox_2d + text_content.', "box"),
-    ("nuscenes_2d_detection", None, "box"),
-    ("nuscenes_lane", None, "line"),
-    ("nuscenes_drivable_area", None, "poly"),
+    ("detection_2d", None, "box"),
+    ("lane_polyline", None, "line"),
+    ("drivable_area", None, "poly"),
     ("computer_use", 'Click on the nearest vehicle. Output a JSON action with coordinate in [0,1000].', "point"),
     ("mobile_agent", 'Tap the center of the road. Output a JSON action with coordinate in [0,999].', "point"),
 ]

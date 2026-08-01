@@ -43,10 +43,17 @@ class SkillSpec:
     default_max_image_side: int = 0  # 0 = no resize, use input resolution
     video_num_frames: int | None = None
     notes: str = ""
+    # Visibility gate. A skill is only shipped to the public UI/CLI when it has
+    # been verified end-to-end on the real model (no generation loop, a usable
+    # structured/textual answer). ``draft`` skills are hidden from the default
+    # catalog and only surface with include_draft=True (testing/iteration).
+    status: str = "verified"
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[a-z0-9][a-z0-9_]*", self.key):
             raise SkillError("skill key must match [a-z0-9][a-z0-9_]*")
+        if self.status not in {"verified", "draft"}:
+            raise SkillError(f"status must be 'verified' or 'draft', got {self.status!r}")
         if self.output_kind not in {
             "text", "formula", "chart", "grounding_2d", "grounding_3d", "code",
             # Auto-labelling output kinds (structured JSON produced on demand):
@@ -89,6 +96,7 @@ class SkillSpec:
             "default_max_new_tokens": self.default_max_new_tokens,
             "default_max_image_side": self.default_max_image_side,
             "video_num_frames": self.video_num_frames,
+            "status": self.status,
         }
 
 
@@ -360,19 +368,27 @@ MOBILE_AGENT = SkillSpec(
 )
 
 
-# --- Auto-labelling skills (driving / nuScenes-style scenes) ------------------
+# --- Auto-labelling skills (general driving-scene weak annotator) ------------
 #
 # These are not cookbook reproductions: they turn the Thinking model into a
 # weak annotator that emits structured pseudo-labels (2D boxes, lane polylines,
 # a scene graph, a drivable polygon) in the [0,1000] image coordinate frame.
-# The prompts ask for compact JSON after a short reasoning, but the parsers in
-# skill_parsers.py are tolerant and also recover coordinates mentioned inline
-# in prose, because the 2B Thinking model frequently narrates before answering.
+# They are GENERAL driving-scene skills (work on any camera image), not tied to
+# nuScenes. The prompts ask for compact JSON after a short reasoning, but the
+# parsers in skill_parsers.py are tolerant and also recover coordinates
+# mentioned inline in prose, because the 2B Thinking model frequently narrates
+# before answering.
+#
+# Status discipline: a skill ships as ``verified`` only after an end-to-end
+# run on the real model confirms it produces a usable output without looping.
+# Skills that the 2B model cannot converge on (e.g. dense polygon segmentation)
+# are kept as ``draft`` until/unless a stronger model or a better prompt fixes
+# them; draft skills are hidden from the default public catalog.
 
-NUSCENES_2D_DETECTION = SkillSpec(
-    key="nuscenes_2d_detection",
-    label="nuScenes 2D detection (auto-label)",
-    cookbook="auto-labelling (2d_grounding + nuScenes categories)",
+DETECTION_2D = SkillSpec(
+    key="detection_2d",
+    label="2D object detection (auto-label)",
+    cookbook="auto-labelling (2d_grounding + driving categories)",
     prompt=(
         "Detect every traffic-relevant object in this driving image. "
         "Allowed classes: vehicle, pedestrian, cyclist, traffic_sign, "
@@ -393,11 +409,12 @@ NUSCENES_2D_DETECTION = SkillSpec(
         "Weak annotator for 2D detection. Parser recovers bbox_2d from strict "
         "JSON or from inline '[x1, y1, x2, y2] - class' prose."
     ),
+    status="verified",
 )
 
-NUSCENES_LANE = SkillSpec(
-    key="nuscenes_lane",
-    label="nuScenes lane polyline (auto-label)",
+LANE_POLYLINE = SkillSpec(
+    key="lane_polyline",
+    label="Lane polyline (auto-label)",
     cookbook="auto-labelling (lane perception)",
     prompt=(
         "Trace every visible road lane marking as an ordered polyline. "
@@ -418,11 +435,12 @@ NUSCENES_LANE = SkillSpec(
         "Weak annotator for lane perception; points are scaled [0,1000]. "
         "Parser recovers lane_id + points from JSON or inline 'lane N: ...'."
     ),
+    status="draft",
 )
 
-NUSCENES_SCENE_GRAPH = SkillSpec(
-    key="nuscenes_scene_graph",
-    label="nuScenes scene graph (auto-label)",
+SCENE_GRAPH = SkillSpec(
+    key="scene_graph",
+    label="Scene graph (auto-label)",
     cookbook="auto-labelling (scene understanding)",
     prompt=(
         "Build a scene graph for this driving image. Nodes are the main "
@@ -442,11 +460,12 @@ NUSCENES_SCENE_GRAPH = SkillSpec(
         "Weak annotator for scene understanding; no pixel coordinates. "
         "Parser recovers subject/relation/object triples from JSON or prose."
     ),
+    status="draft",
 )
 
-NUSCENES_DRIVABLE_AREA = SkillSpec(
-    key="nuscenes_drivable_area",
-    label="nuScenes drivable area polygon (auto-label)",
+DRIVABLE_AREA = SkillSpec(
+    key="drivable_area",
+    label="Drivable area polygon (auto-label)",
     cookbook="auto-labelling (drivable-area segmentation)",
     prompt=(
         "Outline the drivable road surface in front of the ego vehicle as a "
@@ -467,6 +486,7 @@ NUSCENES_DRIVABLE_AREA = SkillSpec(
         "Weak annotator for drivable-area segmentation; polygon scaled "
         "[0,1000]. Parser recovers the polygon from JSON or inline point list."
     ),
+    status="draft",
 )
 
 
@@ -488,11 +508,11 @@ _SKILL_ITEMS = (
     MMCODE,
     COMPUTER_USE,
     MOBILE_AGENT,
-    # Auto-labelling skills (driving / nuScenes-style):
-    NUSCENES_2D_DETECTION,
-    NUSCENES_LANE,
-    NUSCENES_SCENE_GRAPH,
-    NUSCENES_DRIVABLE_AREA,
+    # General driving-scene auto-labelling skills:
+    DETECTION_2D,
+    LANE_POLYLINE,
+    SCENE_GRAPH,
+    DRIVABLE_AREA,
 )
 
 SKILLS: Mapping[str, SkillSpec] = MappingProxyType({item.key: item for item in _SKILL_ITEMS})
@@ -504,8 +524,19 @@ def get_skill(key: str) -> SkillSpec:
     return SKILLS[key]
 
 
-def public_skills() -> dict[str, Any]:
-    return {"schema_version": 1, "skills": [item.to_public_dict() for item in _SKILL_ITEMS]}
+def public_skills(include_draft: bool = False) -> dict[str, Any]:
+    """Serialize the skill catalog.
+
+    By default only ``verified`` skills are exposed (the public contract). Set
+    ``include_draft=True`` to also return ``draft`` skills (for testing/CLI
+    iteration on not-yet-verified skills).
+    """
+    skills = [
+        item.to_public_dict()
+        for item in _SKILL_ITEMS
+        if include_draft or item.status == "verified"
+    ]
+    return {"schema_version": 1, "skills": skills}
 
 
 def resolve_skill(

@@ -443,7 +443,7 @@ async def _save_uploads(
 _COORD_SKILLS = {
     "2d_grounding", "3d_grounding", "spatial_understanding",
     "omni_recognition", "ocr_spotting", "computer_use", "mobile_agent",
-    "nuscenes_2d_detection", "nuscenes_lane", "nuscenes_drivable_area",
+    "detection_2d", "lane_polyline", "drivable_area",
 }
 
 
@@ -521,7 +521,7 @@ def _build_skill_overlays(
             })
         return overlays, image_size
 
-    if skill_key == "nuscenes_lane":
+    if skill_key == "lane_polyline":
         # Lanes: {"lane_id": int, "points": [[x,y],...]}. Draw as open polyline.
         for item in parsed:
             pts = item.get("points") or []
@@ -539,7 +539,7 @@ def _build_skill_overlays(
                 })
         return overlays, image_size
 
-    if skill_key == "nuscenes_drivable_area":
+    if skill_key == "drivable_area":
         # Drivable area: polygon points. Draw as filled-ish poly outline.
         for item in parsed:
             pts = item.get("points") or item.get("polygon") or []
@@ -660,10 +660,10 @@ def create_app(
         return public_presets()
 
     @app.get("/api/skills")
-    def skills():
+    def skills(include_draft: bool = False):
         from qwen3_vl.skills import public_skills
 
-        return public_skills()
+        return public_skills(include_draft=bool(include_draft))
 
     @app.get("/api/status")
     def status():

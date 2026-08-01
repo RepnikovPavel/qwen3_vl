@@ -83,19 +83,24 @@ QWEN3_BIND=0.0.0.0 ./docker/run_demo.sh "$MODELS" "$STATE" 8001
 
 21 skills: 17 reproducing the official Qwen3-VL cookbooks plus 4
 auto-labelling skills that turn the 2B Thinking FP8 model into a weak
-annotator for driving scenes (nuScenes-style). See
+annotator for general driving scenes. See
 [`docs/skills.md`](docs/skills.md) for the full skill → cookbook mapping and
 coordinate conventions.
 
+A skill ships as **verified** (exposed in `qwen3-vl skills` / the web UI) only
+after an end-to-end run on the real model confirms it produces a usable output
+without looping. Not-yet-verified skills stay **draft** (hidden by default;
+`qwen3-vl skills --include-draft` shows them).
+
 ```bash
-qwen3-vl skills                                       # list all skills
+qwen3-vl skills                                       # list verified skills
 qwen3-vl skill --skill 2d_grounding --model 2b --image scene.jpg
 qwen3-vl skill --skill ocr_spotting --model 2b --image receipt.png
 qwen3-vl skill --skill video_understanding --model 2b --image-dir frames/ --num-frames 8
-qwen3-vl skill --skill nuscenes_2d_detection --model 2b --image drive.jpg
-qwen3-vl skill --skill nuscenes_lane --model 2b --image drive.jpg
-qwen3-vl skill --skill nuscenes_scene_graph --model 2b --image drive.jpg
-qwen3-vl skill --skill nuscenes_drivable_area --model 2b --image drive.jpg
+qwen3-vl skill --skill detection_2d --model 2b --image drive.jpg
+qwen3-vl skill --skill lane_polyline --model 2b --image drive.jpg
+qwen3-vl skill --skill scene_graph --model 2b --image drive.jpg
+qwen3-vl skill --skill drivable_area --model 2b --image drive.jpg
 ```
 
 Single-image skills (`describe`, `ocr`, `ocr_spotting`, `2d_grounding`,

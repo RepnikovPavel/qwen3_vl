@@ -41,10 +41,22 @@ qwen3-vl skill --skill video_understanding --model 2b --video clip.mp4
 | `mmcode` | mmcode.ipynb | code (HTML/py) | single image | — |
 | `computer_use` | computer_use.ipynb | JSON action | single image | 0–1000 |
 | `mobile_agent` | mobile_agent.ipynb | JSON action | single image | 0–999 |
-| `nuscenes_2d_detection` | auto-labelling | JSON `bbox_2d`+`class` | single image | 0–1000 |
-| `nuscenes_lane` | auto-labelling | JSON `{lane_id,points}` | single image | 0–1000 |
-| `nuscenes_scene_graph` | auto-labelling | JSON `(s,r,o)` triples | single image | — |
-| `nuscenes_drivable_area` | auto-labelling | JSON `{polygon:[...]}` | single image | 0–1000 |
+| `detection_2d` | auto-labelling | JSON `bbox_2d`+`class` | single image | 0–1000 |
+| `lane_polyline` | auto-labelling | JSON `{lane_id,points}` | single image | 0–1000 |
+| `scene_graph` | auto-labelling | JSON `(s,r,o)` triples | single image | — |
+| `drivable_area` | auto-labelling | JSON `{polygon:[...]}` | single image | 0–1000 |
+
+## Skill status (verified vs draft)
+
+A skill ships as **verified** — exposed by `qwen3-vl skills`, the `skills`
+JSON catalog, and the web UI — only after an end-to-end run on the real model
+confirms it converges to a usable output **without a generation loop**. Skills
+the 2B Thinking model cannot yet do reliably are kept **draft**: still
+resolvable (`get_skill`) and runnable (`qwen3-vl skill --skill <draft>`), but
+hidden from the default catalog. List them with `qwen3-vl skills
+--include-draft` (or `GET /api/skills?include_draft=1`). The status is a field
+on `SkillSpec` (`status="verified" | "draft"`) and is included in
+`to_public_dict()`.
 
 ## Coordinate conventions
 
@@ -65,16 +77,17 @@ drivable polygon as a translucent green overlay.
 
 ## Auto-labelling skills (weak annotator for driving scenes)
 
-The four `nuscenes_*` skills are **not** cookbook reproductions: they turn the
-2B Thinking FP8 model into a weak annotator that emits structured
-pseudo-labels for nuScenes-style driving frames. Use them to bootstrap a
-label set that you then verify/refine, not as ground truth.
+The four auto-labelling skills are **not** cookbook reproductions: they turn
+the 2B Thinking FP8 model into a weak annotator that emits structured
+pseudo-labels for **general** driving-scene frames (any camera image — not tied
+to nuScenes). Use them to bootstrap a label set that you then verify/refine,
+not as ground truth.
 
 ```bash
-qwen3-vl skill --skill nuscenes_2d_detection --model 2b --image frame.jpg
-qwen3-vl skill --skill nuscenes_lane           --model 2b --image frame.jpg
-qwen3-vl skill --skill nuscenes_scene_graph    --model 2b --image frame.jpg
-qwen3-vl skill --skill nuscenes_drivable_area  --model 2b --image frame.jpg
+qwen3-vl skill --skill detection_2d --model 2b --image frame.jpg
+qwen3-vl skill --skill lane_polyline   --model 2b --image frame.jpg
+qwen3-vl skill --skill scene_graph     --model 2b --image frame.jpg
+qwen3-vl skill --skill drivable_area   --model 2b --image frame.jpg
 ```
 
 Class vocabularies (fixed in the prompt so labels are stable across frames):
@@ -86,6 +99,16 @@ Class vocabularies (fixed in the prompt so labels are stable across frames):
 * **Lane** — one `lane_id` per visible lane, points ordered bottom→top.
 * **Drivable area** — a single closed polygon over the road in front of the
   ego vehicle.
+
+**Known capability edge (why some are draft).** The official `2d_grounding`
+cookbook itself warns that the model *"may enter an endless generation loop"*
+when asked to emit more than ~40–50 dense instances, and merges closely-spaced
+points. Dense-polygon / dense-polyline requests hit exactly that failure mode
+on the 2B model (verified: `drivable_area` loops to `max_new_tokens` with an
+empty polygon). The verified path for contour-style geometry is to ask the
+model only for a **sparse set of boundary points** via the native `point_2d`
+grounding primitive and assemble the polygon/polyline deterministically on the
+host — not to ask the model to emit a dense contour in one shot.
 
 **Tolerant parsing.** The 2B Thinking model narrates before answering, so the
 parsers in `skill_parsers.py` (`parse_lane`, `parse_scene_graph`,

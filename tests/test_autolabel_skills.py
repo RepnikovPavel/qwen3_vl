@@ -1,4 +1,4 @@
-"""Tests for the nuScenes auto-labelling skills and their tolerant parsers.
+"""Tests for the driving-scene auto-labelling skills and their tolerant parsers.
 
 These cover the structured-output parsers added for weak annotation
 (2D detection, lane polylines, scene graph, drivable-area polygon). They run
@@ -16,10 +16,10 @@ from qwen3_vl.skill_parsers import coord_scale, parse_skill
 
 
 AUTOLABEL_KEYS = (
-    "nuscenes_2d_detection",
-    "nuscenes_lane",
-    "nuscenes_scene_graph",
-    "nuscenes_drivable_area",
+    "detection_2d",
+    "lane_polyline",
+    "scene_graph",
+    "drivable_area",
 )
 
 
@@ -39,10 +39,10 @@ class AutoLabelCatalogTest(unittest.TestCase):
         # Skills carrying pixel coordinates must report is_spatial=True and a
         # non-zero coord_scale; the scene graph has no coords and must be False.
         spatial = {
-            "nuscenes_2d_detection": True,
-            "nuscenes_lane": True,
-            "nuscenes_scene_graph": False,
-            "nuscenes_drivable_area": True,
+            "detection_2d": True,
+            "lane_polyline": True,
+            "scene_graph": False,
+            "drivable_area": True,
         }
         for key, expected in spatial.items():
             spec = get_skill(key)
@@ -53,8 +53,8 @@ class AutoLabelCatalogTest(unittest.TestCase):
                 self.assertEqual(coord_scale(key), 0, key)
 
     def test_resolve_returns_full_plan(self):
-        resolved = resolve_skill("nuscenes_2d_detection")
-        self.assertEqual(resolved["skill"], "nuscenes_2d_detection")
+        resolved = resolve_skill("detection_2d")
+        self.assertEqual(resolved["skill"], "detection_2d")
         self.assertEqual(resolved["coord_scale"], 1000)
         self.assertIn("bbox_2d", resolved["prompt"])
         self.assertGreater(resolved["max_new_tokens"], 0)
@@ -66,7 +66,7 @@ class LaneParserTest(unittest.TestCase):
             '[{"lane_id": 0, "points": [[100, 900], [120, 700], [140, 500]]}, '
             '{"lane_id": 1, "points": [[800, 900], [820, 700]]}]'
         )
-        lanes = parse_skill("nuscenes_lane", text)
+        lanes = parse_skill("lane_polyline", text)
         self.assertEqual(len(lanes), 2)
         self.assertEqual(lanes[0]["lane_id"], 0)
         self.assertEqual(lanes[0]["points"][0], [100, 900])
@@ -79,18 +79,18 @@ class LaneParserTest(unittest.TestCase):
             "lane 0: [[100, 900], [140, 500]]\n"
             "lane 1: [[800, 900], [820, 700]]\n"
         )
-        lanes = parse_skill("nuscenes_lane", text)
+        lanes = parse_skill("lane_polyline", text)
         self.assertEqual(len(lanes), 2)
         self.assertEqual(lanes[0]["points"][0], [100, 900])
 
     def test_empty_and_garbage_return_empty_list(self):
-        self.assertEqual(parse_skill("nuscenes_lane", ""), [])
-        self.assertEqual(parse_skill("nuscenes_lane", "no coordinates here"), [])
+        self.assertEqual(parse_skill("lane_polyline", ""), [])
+        self.assertEqual(parse_skill("lane_polyline", "no coordinates here"), [])
 
     def test_bare_coordinate_pairs_collapse_into_single_lane(self):
         # If the model just lists points without a lane_id, we still recover
         # them as one lane so downstream tooling gets *something* to draw.
-        lanes = parse_skill("nuscenes_lane", "saw points at [10, 20] and [30, 40]")
+        lanes = parse_skill("lane_polyline", "saw points at [10, 20] and [30, 40]")
         self.assertEqual(len(lanes), 1)
         self.assertEqual(len(lanes[0]["points"]), 2)
 
@@ -101,7 +101,7 @@ class SceneGraphParserTest(unittest.TestCase):
             '[{"subject": "truck", "relation": "left_of", "object": "van"}, '
             '{"subject": "car", "relation": "ahead_of", "object": "truck"}]'
         )
-        triples = parse_skill("nuscenes_scene_graph", text)
+        triples = parse_skill("scene_graph", text)
         self.assertEqual(len(triples), 2)
         self.assertEqual(triples[0], {
             "subject": "truck", "relation": "left_of", "object": "van",
@@ -110,7 +110,7 @@ class SceneGraphParserTest(unittest.TestCase):
     def test_prose_paren_triples_and_quote_cleaning(self):
         # Inline '(subj, rel, obj)' with JSON-style quotes must be cleaned.
         text = 'The graph: ("truck", "left of", "van") and <car> ahead_of <truck>.'
-        triples = parse_skill("nuscenes_scene_graph", text)
+        triples = parse_skill("scene_graph", text)
         # Both the paren and the angle-bracket patterns should fire.
         subjects = {t["subject"] for t in triples}
         self.assertIn("truck", subjects)
@@ -124,32 +124,32 @@ class SceneGraphParserTest(unittest.TestCase):
         self.assertIn("left_of", relations)
 
     def test_empty_input_returns_empty(self):
-        self.assertEqual(parse_skill("nuscenes_scene_graph", ""), [])
+        self.assertEqual(parse_skill("scene_graph", ""), [])
 
 
 class DrivableAreaParserTest(unittest.TestCase):
     def test_strict_json_polygon(self):
         text = '{"polygon": [[200, 900], [800, 900], [600, 500], [400, 500]]}'
-        result = parse_skill("nuscenes_drivable_area", text)
+        result = parse_skill("drivable_area", text)
         self.assertEqual(len(result["polygon"]), 4)
         self.assertEqual(result["polygon"][0], [200, 900])
 
     def test_bare_list_is_treated_as_polygon(self):
         result = parse_skill(
-            "nuscenes_drivable_area", "[[100, 800], [900, 800], [500, 300]]"
+            "drivable_area", "[[100, 800], [900, 800], [500, 300]]"
         )
         self.assertEqual(len(result["polygon"]), 3)
 
     def test_prose_coordinate_recovery(self):
         result = parse_skill(
-            "nuscenes_drivable_area",
+            "drivable_area",
             "The drivable region corners are roughly [10, 20] and [30, 40].",
         )
         self.assertEqual(len(result["polygon"]), 2)
 
     def test_empty_returns_empty_polygon(self):
         self.assertEqual(
-            parse_skill("nuscenes_drivable_area", ""),
+            parse_skill("drivable_area", ""),
             {"polygon": []},
         )
 
@@ -162,7 +162,7 @@ class DetectionParserTest(unittest.TestCase):
             '[{"class": "vehicle", "bbox_2d": [65, 245, 345, 675]}, '
             '{"class": "pedestrian", "bbox_2d": [365, 485, 405, 635]}]'
         )
-        parsed = parse_skill("nuscenes_2d_detection", text)
+        parsed = parse_skill("detection_2d", text)
         self.assertEqual(len(parsed), 2)
         self.assertEqual(parsed[0]["bbox_2d"], [65, 245, 345, 675])
         self.assertEqual(parsed[0]["class"], "vehicle")
@@ -177,7 +177,7 @@ class DetectionParserTest(unittest.TestCase):
             "Pedestrian: [365, 485, 405, 635] - pedestrian.\n"
             "Barrier: [675, 555, 725, 660] - barrier."
         )
-        parsed = parse_skill("nuscenes_2d_detection", text)
+        parsed = parse_skill("detection_2d", text)
         self.assertEqual(len(parsed), 4)
         classes = [item["class"] for item in parsed]
         self.assertEqual(classes, ["vehicle", "vehicle", "pedestrian", "barrier"])
@@ -188,7 +188,7 @@ class DetectionParserTest(unittest.TestCase):
         # No trailing "- class": the parser must still pull the class from the
         # window around the bbox ("truck at [...]").
         text = "I see a truck at [65, 245, 345, 675] and a car at [625, 525, 665, 580]."
-        parsed = parse_skill("nuscenes_2d_detection", text)
+        parsed = parse_skill("detection_2d", text)
         self.assertGreaterEqual(len(parsed), 2)
         self.assertEqual(parsed[0]["class"], "vehicle")
         self.assertEqual(parsed[1]["class"], "vehicle")
@@ -196,7 +196,7 @@ class DetectionParserTest(unittest.TestCase):
     def test_em_dash_separator_is_recognised(self):
         # The model often uses an em dash (U+2014), not a hyphen.
         text = "Truck: [65, 245, 345, 675] — vehicle."
-        parsed = parse_skill("nuscenes_2d_detection", text)
+        parsed = parse_skill("detection_2d", text)
         self.assertEqual(len(parsed), 1)
         self.assertEqual(parsed[0]["class"], "vehicle")
 

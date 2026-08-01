@@ -38,10 +38,10 @@ placement, 1 measured pass at a 1536-token budget:
 
 | Skill | Median latency (s) | Tokens/s | Peak VRAM (MB) | Finish |
 |-------|-------------------:|---------:|---------------:|:------:|
-| nuscenes_2d_detection | 112.0 | 13.7 | 3025 | max_new_tokens |
-| nuscenes_lane | 77.8 | 11.9 | 3025 | eos |
-| nuscenes_scene_graph | 112.4 | 13.7 | 3024 | max_new_tokens |
-| nuscenes_drivable_area | 111.8 | 13.8 | 3023 | max_new_tokens |
+| detection_2d | 112.0 | 13.7 | 3025 | max_new_tokens |
+| lane_polyline | 77.8 | 11.9 | 3025 | eos |
+| scene_graph | 112.4 | 13.7 | 3024 | max_new_tokens |
+| drivable_area | 111.8 | 13.8 | 3023 | max_new_tokens |
 
 _Measured on the GPU server (192.168.1.68) inside `qwen3-vl:trtllm-1.3.0rc20`
 with `benchmark.py --model 2b --skill <key> --max-new-tokens 1536 --runs 1

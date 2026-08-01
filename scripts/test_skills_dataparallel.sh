@@ -23,7 +23,7 @@ WORKER="$ROOT/scripts/dataparallel_worker.py"
 
 # Split the 11 coord skills across the two GPUs.
 GPU0_SKILLS="2d_grounding 3d_grounding spatial_understanding omni_recognition ocr_spotting"
-GPU1_SKILLS="nuscenes_2d_detection nuscenes_lane nuscenes_scene_graph nuscenes_drivable_area computer_use mobile_agent"
+GPU1_SKILLS="detection_2d lane_polyline scene_graph drivable_area computer_use mobile_agent"
 
 echo "=== data-parallel run: gpu0=[${GPU0_SKILLS}] gpu1=[${GPU1_SKILLS}] ===" >&2
 

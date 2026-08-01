@@ -59,18 +59,20 @@ def _models(argv: Sequence[str]) -> int:
 
 
 def _skills(argv: Sequence[str]) -> int:
-    if argv and argv != ["--json"]:
-        raise SystemExit("skills accepts only --json")
+    accepted = {"--json", "--include-draft"}
+    unknown = [a for a in argv if a not in accepted]
+    if unknown:
+        raise SystemExit(f"skills accepts only --json / --include-draft (got {unknown})")
     from .skills import public_skills
 
-    payload = public_skills()
-    if argv == ["--json"]:
+    payload = public_skills(include_draft="--include-draft" in argv)
+    if "--json" in argv:
         print(json.dumps(payload, indent=2))
     else:
-        print("SKILL                OUTPUT_KIND   FRAMES         COOKBOOK")
+        print("SKILL                STATUS     OUTPUT_KIND   FRAMES         COOKBOOK")
         for item in payload["skills"]:
             print(
-                f"{item['key']:<20} {item['output_kind']:<13} "
+                f"{item['key']:<20} {item['status']:<10} {item['output_kind']:<13} "
                 f"{item['frames_kind']:<14} {item['cookbook']}"
             )
     return 0

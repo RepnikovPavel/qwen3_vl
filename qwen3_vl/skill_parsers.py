@@ -29,8 +29,8 @@ def parse_grounding_1000(text: str) -> list[dict[str, Any]]:
     return _parse_grounding_1000(text)
 
 
-# Recognised nuScenes-style detection classes (kept in sync with the
-# nuscenes_2d_detection prompt so the auto-label parser can recover the class
+# Recognised driving-scene detection classes (kept in sync with the
+# detection_2d prompt so the auto-label parser can recover the class
 # from prose, not just from strict JSON).
 NUSCENES_CLASSES = (
     "vehicle", "pedestrian", "cyclist", "traffic_sign", "traffic_light",
@@ -443,11 +443,11 @@ PARSERS: dict[str, tuple[Callable[[str], Any], int]] = {
     "mmcode": (parse_plain, 0),
     "computer_use": (parse_plain, 1000),
     "mobile_agent": (parse_plain, 999),
-    # Auto-labelling skills (driving / nuScenes-style):
-    "nuscenes_2d_detection": (parse_nuscenes_detection, 1000),
-    "nuscenes_lane": (parse_lane, 1000),
-    "nuscenes_scene_graph": (parse_scene_graph, 0),
-    "nuscenes_drivable_area": (parse_drivable_area, 1000),
+    # Auto-labelling skills (general driving-scene):
+    "detection_2d": (parse_nuscenes_detection, 1000),
+    "lane_polyline": (parse_lane, 1000),
+    "scene_graph": (parse_scene_graph, 0),
+    "drivable_area": (parse_drivable_area, 1000),
 }
 
 
