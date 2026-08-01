@@ -22,6 +22,8 @@ Commands:
   eval-run       run all synthetic VL evaluation fixtures
   parity-run     compare direct Transformers generation with the runtime
   sweep-context  find the practical context limit with isolated processes
+  unsloth-pairs  list Qwen3-VL FP8 variants paired with the unsloth repackage
+  regress-unsloth  regression: official Qwen/ vs unsloth/ checkpoint (GPU)
 
 Run `qwen3-vl COMMAND --help` for command-specific options.
 """
@@ -119,6 +121,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .context_sweep import main as sweep_main
 
         return sweep_main(rest)
+    if command == "unsloth-pairs":
+        import qwen3_vl_unsloth as unsloth_main
+
+        return unsloth_main.main(rest)
+    if command == "regress-unsloth":
+        import importlib
+        import os
+        # The runner lives under scripts/ (a tool, not a library module);
+        # import it by path so `qwen3-vl regress-unsloth ...` works without
+        # a separate install step.
+        repo_root = os.path.dirname(os.path.dirname(__file__))
+        scripts_dir = os.path.join(repo_root, "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        regress = importlib.import_module("regress_unsloth")
+        return regress.main(rest)
 
     print(f"unknown command: {command}\n\n{USAGE}", file=sys.stderr)
     return 2

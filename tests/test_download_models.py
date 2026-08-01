@@ -358,5 +358,101 @@ class DownloadModelTest(unittest.TestCase):
             download_models._query_remote_tree(spec)
 
 
+class InspectRemoteCheckpointTest(unittest.TestCase):
+    """Tests for inspect_remote_checkpoint (trusted remote source accounting).
+
+    Used by the unsloth regression harness to load the unsloth/ repackage,
+    which fails the Qwen-pinned catalog manifest. It must count
+    tensors/scales/shards from model.safetensors.index.json and read the FP8
+    skip layers from config.json — without comparing anything to the catalog.
+    """
+
+    def _make_snapshot(self, root: Path, *, weight_map: dict, skip_layers: list[str] | None):
+        """Write a minimal snapshot with an index + config + dummy shards."""
+        root.mkdir(parents=True)
+        shards = sorted(set(weight_map.values()))
+        for shard in shards:
+            (root / shard).write_bytes(b"\x00")  # placeholder bytes
+        index = {
+            "metadata": {"total_size": 0},
+            "weight_map": dict(weight_map),
+        }
+        (root / "model.safetensors.index.json").write_text(json.dumps(index))
+        quant = {"quant_method": "fp8"}
+        if skip_layers is not None:
+            quant["modules_to_not_convert"] = skip_layers
+        (root / "config.json").write_text(json.dumps({"quantization_config": quant}))
+
+    def test_counts_tensors_scales_and_shards_from_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "snap" / "main"
+            self._make_snapshot(
+                root,
+                weight_map={
+                    "a.weight": "model-00001-of-00002.safetensors",
+                    "b.weight": "model-00001-of-00002.safetensors",
+                    "c.weight_scale_inv": "model-00002-of-00002.safetensors",
+                    "d.weight_scale_inv": "model-00002-of-00002.safetensors",
+                },
+                skip_layers=["vision", "embed"],
+            )
+            result = download_models.inspect_remote_checkpoint(root)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["source"], "trust_remote_source")
+        self.assertEqual(result["tensor_count"], 4)
+        self.assertEqual(result["scale_count"], 2)  # weight_scale_inv entries
+        self.assertEqual(result["shard_count"], 2)
+        self.assertEqual(result["skip_count"], 2)
+        self.assertEqual(len(result["shards"]), 2)
+        self.assertEqual(len(result["weight_files"]), 2)
+
+    def test_ignored_layers_key_is_also_recognised(self):
+        # The catalog wrapper reads modules_to_not_convert OR ignored_layers.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "snap" / "main"
+            self._make_snapshot(
+                root,
+                weight_map={"a.weight": "model.safetensors"},
+                skip_layers=None,  # write config without modules_to_not_convert
+            )
+            # Rewrite config with the legacy ignored_layers key instead.
+            (root / "config.json").write_text(json.dumps({
+                "quantization_config": {"ignored_layers": ["x", "y", "z"]},
+            }))
+            result = download_models.inspect_remote_checkpoint(root)
+        self.assertEqual(result["skip_count"], 3)
+
+    def test_missing_index_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "snap" / "main"
+            root.mkdir(parents=True)
+            with self.assertRaises(FileNotFoundError):
+                download_models.inspect_remote_checkpoint(root)
+
+    def test_missing_directory_raises(self):
+        with self.assertRaises(FileNotFoundError):
+            download_models.inspect_remote_checkpoint(Path("/no/such/path/xyz"))
+
+    def test_empty_weight_map_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "snap" / "main"
+            self._make_snapshot(root, weight_map={}, skip_layers=None)
+            with self.assertRaises(ValueError):
+                download_models.inspect_remote_checkpoint(root)
+
+    def test_does_not_compare_against_catalog(self):
+        # A trusted remote snapshot with "wrong" tensor count (vs any catalog
+        # spec) still inspects fine — there is no catalog argument at all.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "snap" / "main"
+            self._make_snapshot(
+                root,
+                weight_map={f"t{i}.weight": "model.safetensors" for i in range(7)},
+                skip_layers=["v"],
+            )
+            result = download_models.inspect_remote_checkpoint(root)
+        self.assertEqual(result["tensor_count"], 7)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -417,6 +417,63 @@ def _download_artifact(
     raise AssertionError("unreachable download retry state")
 
 
+def inspect_remote_checkpoint(path: str | Path) -> dict[str, Any]:
+    """Inspect a third-party checkpoint snapshot without catalog verification.
+
+    Used for trusted remote sources (e.g. the unsloth/ repackage) that carry
+    byte-identical weights but a patched config/tokenizer, and therefore fail
+    the Qwen-pinned manifest in verify_checkpoint. This reads only
+    ``model.safetensors.index.json`` to count tensors / scales / shards so
+    the FP8 runtime can still load with the same accounting it expects from a
+    catalog-verified checkpoint — no SHA or size is compared to the catalog.
+    """
+    root = Path(path).expanduser().resolve()
+    if not root.is_dir():
+        raise FileNotFoundError(f"checkpoint directory does not exist: {root}")
+    index_path = root / "model.safetensors.index.json"
+    if not index_path.is_file():
+        raise FileNotFoundError(
+            f"remote checkpoint is missing the weight index: {index_path}"
+        )
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    weight_map = index.get("weight_map", {})
+    if not isinstance(weight_map, dict) or not weight_map:
+        raise ValueError("weight_map is missing or empty in the index")
+    shards = sorted(set(weight_map.values()))
+    tensor_names = list(weight_map)
+    tensor_count = len(tensor_names)
+    scale_count = sum(name.endswith(".weight_scale_inv") for name in tensor_names)
+    # Count the FP8-excluded layers from config.json so the verbose log line
+    # that the runtime prints ("excluded_layers=N") keeps working for trusted
+    # remote sources exactly as it does for catalog-verified checkpoints.
+    skip_count = 0
+    config_path = root / "config.json"
+    if config_path.is_file():
+        try:
+            quant = json.loads(config_path.read_text(encoding="utf-8")).get(
+                "quantization_config", {}
+            )
+            skip = quant.get("modules_to_not_convert") or quant.get("ignored_layers") or []
+            if isinstance(skip, list):
+                skip_count = len(skip)
+        except (json.JSONDecodeError, OSError):
+            skip_count = 0
+    return {
+        "ok": True,
+        "path": str(root),
+        "source": "trust_remote_source",
+        "note": "catalog manifest verification skipped (trusted remote source)",
+        "tensor_count": tensor_count,
+        "scale_count": scale_count,
+        "shard_count": len(shards),
+        "shards": [str(root / s) for s in shards],
+        "shard_bytes": sum((root / s).stat().st_size for s in shards if (root / s).is_file()),
+        "skip_count": skip_count,
+        "weight_files": [str(root / s) for s in shards],
+        "full": False,
+    }
+
+
 def verify_checkpoint(
     path: str | Path,
     spec: ModelSpec | str | None = None,
