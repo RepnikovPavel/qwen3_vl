@@ -1282,6 +1282,9 @@ def create_app(
                     uploaded_this_request = True
                 # --- Multi-task (pool) path: submit and stream from the pool. ---
                 if pool is not None:
+                    # The pool owns the job now; mark handed-off so the request
+                    # `finally` does NOT reset/delete the just-uploaded media.
+                    handed_to_worker = True
                     return await _pool_chat_response(
                         pool=pool, store=store, media_root=media_root,
                         session_id=session_id, task=resolved["task"], skill=skill,

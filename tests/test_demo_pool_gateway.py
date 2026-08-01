@@ -179,6 +179,52 @@ class PoolGatewayTest(unittest.TestCase):
         self.assertTrue(any("A short answer." in (m.get("content") or "")
                             for m in msgs), msgs)
 
+    def test_pool_chat_does_not_delete_uploaded_media(self):
+        # Regression: the pool path returns before `handed_to_worker` was set in
+        # the old in-process flow, so the request `finally` reset the session
+        # and deleted the uploaded image right after submit. The worker then
+        # failed with "local image does not exist". The media must survive.
+        pool = _FakePool()
+        app, tmp = _make_app(fake_pool=pool)
+        client = TestClient(app)
+        sess = client.post("/api/sessions", json={"model_id": "2b"})
+        session_id = sess.json()["id"]
+
+        # A tiny valid PNG (1x1) as the upload.
+        from PIL import Image
+        import io
+        buf = io.BytesIO()
+        Image.new("RGB", (2, 2), (10, 20, 30)).save(buf, format="PNG")
+        buf.seek(0)
+
+        result_holder: dict = {}
+
+        def run_chat() -> None:
+            resp = client.post(
+                "/api/chat",
+                data={"session_id": session_id, "model_id": "2b",
+                      "placement": "single", "task": "describe",
+                      "custom_prompt": "what is this"},
+                files={"files": ("x.png", buf, "image/png")},
+            )
+            result_holder["status"] = resp.status_code
+
+        t = threading.Thread(target=run_chat)
+        t.start()
+        deadline = time.monotonic() + 5
+        while not pool.jobs_seen and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(pool.jobs_seen, "pool.submit was not called")
+        # The submitted spec must carry a media path that still exists on disk.
+        spec = pool.jobs_seen[-1]["spec"]
+        media = spec.get("media_inputs") or []
+        self.assertTrue(media, "media not forwarded to the pool")
+        kind, path = media[0]
+        self.assertEqual(kind, "image")
+        self.assertTrue(Path(path).is_file(), f"uploaded media deleted: {path}")
+        pool.finish(pool.jobs_seen[-1]["job_id"])
+        t.join(timeout=5)
+
 
 if __name__ == "__main__":
     unittest.main()
