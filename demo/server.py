@@ -583,6 +583,7 @@ def create_app(
     manager: DemoModelManager,
     store: SessionStore,
     state_dir: str | os.PathLike[str],
+    pool: "WorkerPool | None" = None,
 ) -> FastAPI:
     state_root = Path(state_dir).expanduser().resolve()
     media_root = (state_root / "media").resolve()
@@ -607,6 +608,8 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         manager.start()
+        if pool is not None:
+            pool.start()
         yield
         with generations_lock:
             active = list(generations.values())
@@ -620,6 +623,8 @@ def create_app(
                     worker_thread.join,
                     max(0.0, deadline - time.monotonic()),
                 )
+        if pool is not None:
+            pool.shutdown()
         manager.close()
 
     app = FastAPI(
@@ -1039,6 +1044,150 @@ def create_app(
             except Exception:
                 pass
 
+    async def _pool_chat_response(
+        *, pool: "WorkerPool", store: SessionStore, media_root: Path,
+        session_id: str, task: str, skill: str | None,
+        user_prompt: str, effective_prompt: str, model_key: str,
+        resolved: dict[str, Any], do_sample: bool, temperature: float,
+        top_p: float, top_k: int, video_num_frames: int,
+    ) -> StreamingResponse:
+        """Pool (multi-task) chat path: submit a job and stream its events.
+
+        The model lives in a resident worker process; this gateway only marshals
+        the spec, relays the streamed events as SSE, and on completion runs the
+        same post-processing (overlays + turn persistence) as the in-process path.
+        """
+        current = store.get_session(session_id)
+        if current is None:
+            raise HTTPException(404, "session not found")
+        history = [
+            {"role": item["role"], "content": item["content"]}
+            for item in current["messages"]
+            if item["role"] in {"user", "assistant", "system"}
+        ]
+        internal_media = [
+            store.get_media(item["id"], include_stored_path=True)
+            for item in current["media"]
+        ]
+        media_inputs = [
+            (item["media_type"], str(item["stored_path"]))
+            for item in internal_media
+            if item is not None
+        ]
+        media_history_index = 0 if media_inputs and history else None
+        spec = {
+            "media_inputs": media_inputs,
+            "prompt": effective_prompt,
+            "history": history,
+            "media_history_index": media_history_index,
+            "skill": skill,
+            "params": {
+                "max_new_tokens": resolved["max_new_tokens"],
+                "max_image_side": resolved["max_image_side"],
+                "do_sample": do_sample,
+                "temperature": temperature,
+                "top_p": top_p,
+                "top_k": top_k,
+                "video_num_frames": video_num_frames,
+            },
+        }
+        job_id = pool.submit(
+            session_id=session_id, task=task, skill=skill, spec=spec,
+        )
+        _ = model_key  # the worker loads its own resident model; model_key only gates the session
+        snap = pool.replay_snapshot(job_id)
+        assert snap is not None
+        snapshot_events, last_seq = snap
+
+        def event_source() -> Iterator[str]:
+            yield _sse({"type": "job", "job_id": job_id, "session_id": session_id})
+            cursor = last_seq
+            done_event: dict[str, Any] | None = None
+            # Replay buffered snapshot first (reconnect-safe).
+            for event in snapshot_events:
+                yield _sse(event)
+                if event.get("type") in {"done", "error"}:
+                    done_event = event
+            # Then stream live.
+            for event in pool.events(job_id, after_seq=cursor):
+                if event.get("type") == "_closed":
+                    break
+                yield _sse(event)
+                if event.get("type") in {"done", "error"}:
+                    done_event = event
+            if done_event is not None and done_event.get("type") == "done":
+                _finalize_pool_turn(
+                    store=store, media_root=media_root, session_id=session_id,
+                    task=task, skill=skill, user_prompt=user_prompt,
+                    effective_prompt=effective_prompt, resolved=resolved,
+                    event=done_event,
+                )
+
+        return StreamingResponse(
+            event_source(),
+            media_type="text/event-stream",
+            headers={
+                "X-Session-Id": session_id,
+                "X-Job-Id": job_id,
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    def _finalize_pool_turn(
+        *, store: SessionStore, media_root: Path, session_id: str,
+        task: str, skill: str | None, user_prompt: str,
+        effective_prompt: str, resolved: dict[str, Any], event: dict[str, Any],
+    ) -> None:
+        """Persist the completed pool job as a chat turn (+ skill overlays)."""
+        try:
+            final_answer = event.get("answer") or ""
+            final_reasoning = event.get("reasoning")
+            combined = (final_answer or "") + " " + (final_reasoning or "")
+            if "</think>" in combined:
+                marker_pos = combined.rfind("</think>")
+                before = combined[:marker_pos]
+                after = combined[marker_pos + 8:]
+                if not final_reasoning:
+                    final_reasoning = before.rsplit("<think>", 1)[-1].strip() or final_reasoning
+                if after.strip():
+                    final_answer = after.strip()
+            structured = build_structured_result(task, final_answer)
+            if skill and final_answer:
+                overlays, image_size = _build_skill_overlays(
+                    skill, final_answer, session_id, store, media_root,
+                )
+                if overlays is not None:
+                    structured = dict(structured) if structured else {}
+                    structured["overlays"] = overlays
+                    structured["image_size"] = image_size
+            assistant_content = final_answer
+            if not assistant_content and not final_reasoning:
+                assistant_content = (
+                    "[loop detected]" if event.get("loop_detected")
+                    else ("[stopped]" if event.get("finish_reason") == "stopped"
+                          else "[empty response]")
+                )
+            store.append_turn(
+                session_id,
+                user_prompt or effective_prompt,
+                assistant_content,
+                reasoning=final_reasoning,
+                metrics={
+                    "task": task,
+                    "generation": {
+                        k: event.get(k) for k in (
+                            "finish_reason", "generated_tokens", "tokens_per_second",
+                            "prompt_tokens", "visual_tokens", "peak_vram_mib_per_device",
+                            "loop_detected",
+                        )
+                    },
+                    "structured": structured,
+                },
+            )
+        except Exception:
+            LOGGER.exception("failed to finalize pool turn for %s", session_id)
+
     @app.post("/api/chat")
     async def chat(
         session_id: str = Form(...),
@@ -1131,6 +1280,16 @@ def create_app(
                         )
                     await _save_uploads(uploads, session_id, store, media_root)
                     uploaded_this_request = True
+                # --- Multi-task (pool) path: submit and stream from the pool. ---
+                if pool is not None:
+                    return await _pool_chat_response(
+                        pool=pool, store=store, media_root=media_root,
+                        session_id=session_id, task=resolved["task"], skill=skill,
+                        user_prompt=user_prompt, effective_prompt=effective_prompt,
+                        model_key=model_key, resolved=resolved,
+                        do_sample=do_sample, temperature=temperature,
+                        top_p=top_p, top_k=top_k, video_num_frames=video_num_frames,
+                    )
                 manager.acquire()
                 acquired = True
                 manager.set_keep_model_loaded(
@@ -1342,6 +1501,52 @@ def create_app(
             },
         )
 
+    # --- Pool (multi-task) endpoints ---------------------------------------
+    # These exist only when the app was built with a WorkerPool. They expose the
+    # job queue / running jobs (for the UI task panel) and per-job cancel +
+    # reconnectable streaming. The single-task /api/chat path is unchanged.
+
+    @app.get("/api/jobs")
+    def jobs():
+        if pool is None:
+            return {"enabled": False, "jobs": []}
+        return {"enabled": True, "jobs": pool.jobs()}
+
+    @app.post("/api/stop_job/{job_id}")
+    def stop_job(job_id: str):
+        if pool is None:
+            return {"ok": False, "reason": "multi-task pool not enabled"}
+        ok = pool.stop(job_id) if pool is not None else False
+        return {"ok": ok}
+
+    @app.get("/api/jobs/{job_id}/stream")
+    def job_stream(job_id: str):
+        if pool is None:
+            raise HTTPException(503, "multi-task pool not enabled")
+        snap = pool.replay_snapshot(job_id)
+        if snap is None:
+            raise HTTPException(404, "no such job")
+
+        def event_source() -> Iterator[str]:
+            snapshot_events, last_seq = snap
+            for event in snapshot_events:
+                yield _sse(event)
+            cursor = last_seq
+            for event in pool.events(job_id, after_seq=cursor):
+                yield _sse(event)
+                if event.get("type") in {"done", "error", "_closed"}:
+                    return
+
+        return StreamingResponse(
+            event_source(),
+            media_type="text/event-stream",
+            headers={
+                "X-Job-Id": job_id,
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     return app
 
 
@@ -1349,13 +1554,54 @@ def build_app_from_env() -> FastAPI:
     # Prefer the mounted persistent state dir when running in our standard container setup.
     default_state = "/state" if Path("/state").exists() else "/tmp/qwen3-vl-demo-state"
     state_dir = Path(os.environ.get("DEMO_STATE_DIR", default_state))
+    ckpt_dir = os.environ.get("CKPTDIR", os.environ.get("HF_HOME", "~/.cache/huggingface"))
     manager = DemoModelManager(
-        os.environ.get("CKPTDIR", os.environ.get("HF_HOME", "~/.cache/huggingface")),
+        ckpt_dir,
         os.environ.get("QWEN3_FP8_KERNEL_DIR"),
         idle_seconds=int(os.environ.get("DEMO_IDLE_SECONDS", "600")),
     )
     store = SessionStore(state_dir / "sessions.sqlite")
-    return create_app(manager, store, state_dir)
+
+    pool: WorkerPool | None = None
+    if os.environ.get("DEMO_MULTITASK", "0") == "1":
+        pool = _build_pool_from_env(ckpt_dir=ckpt_dir, state_dir=state_dir)
+    return create_app(manager, store, state_dir, pool=pool)
+
+
+def _build_pool_from_env(*, ckpt_dir: str, state_dir: Path) -> "WorkerPool | None":
+    """Construct a WorkerPool from env, or None if no GPU is visible."""
+    from demo.worker_pool import WorkerPool
+
+    gpu_ids = _visible_gpu_ids()
+    if not gpu_ids:
+        LOGGER.warning("DEMO_MULTITASK=1 but no visible CUDA GPUs; falling back to single-task")
+        return None
+    workers_per_gpu = max(1, int(os.environ.get("DEMO_WORKERS_PER_GPU", "1")))
+    logs_dir = state_dir / "thinking_logs"
+    kernel_dir = os.environ.get("QWEN3_FP8_KERNEL_DIR")
+    model_size = os.environ.get("DEMO_WORKER_MODEL", os.environ.get("DEMO_MODEL", "2b"))
+    stall = float(os.environ.get("DEMO_STALL_TIMEOUT", "120"))
+    LOGGER.info(
+        "multi-task pool: gpus=%s workers/gpu=%d model=%s",
+        gpu_ids, workers_per_gpu, model_size,
+    )
+    return WorkerPool(
+        ckpt_dir=ckpt_dir, kernel_dir=kernel_dir, logs_dir=logs_dir,
+        gpu_ids=gpu_ids, model_size=model_size,
+        workers_per_gpu=workers_per_gpu, stall_timeout=stall,
+        verbose=os.environ.get("DEMO_POOL_VERBOSE", "0") == "1",
+    )
+
+
+def _visible_gpu_ids() -> list[int]:
+    """Best-effort list of visible CUDA GPU indices (0..n-1)."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return list(range(torch.cuda.device_count()))
+    except Exception:  # noqa: BLE001
+        pass
+    return []
 
 
 app = build_app_from_env()
