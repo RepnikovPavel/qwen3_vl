@@ -266,12 +266,23 @@ def parse_lane(text: str) -> list[dict[str, Any]]:
     """Lane polylines (coord scale 0..1000). Tolerant of prose.
 
     Returns a list of ``{"lane_id": int, "points": [[x, y], ...]}`` dicts.
-    Recovers from strict JSON, from 'lane N: ...' prose, and finally from any
-    bare coordinate pairs found in the text (collapsed into one lane).
+
+    Three accepted shapes, tried in order:
+    * The composed point-grounding output: a JSON array of
+      ``{"point_2d": [x, y], "lane_id": 0, "rank": 0}``. Points are grouped by
+      lane_id and ordered by rank into per-lane polylines on the host.
+    * A strict JSON list of ``{"lane_id": int, "points": [[x, y], ...]}``.
+    * 'lane N: ...' prose, and finally any bare coordinate pairs (one lane).
     """
     if not text:
         return []
     data = _extract_json_block(text)
+
+    # Composed path: group point_2d items by lane_id, order by rank.
+    grouped = _group_lane_points(_collect_point_2d_lane(data))
+    if grouped:
+        return grouped
+
     lanes: list[dict[str, Any]] = []
     if isinstance(data, list):
         for index, item in enumerate(data):
@@ -356,11 +367,28 @@ def parse_scene_graph(text: str) -> list[dict[str, str]]:
 def parse_drivable_area(text: str) -> dict[str, Any]:
     """Drivable-area polygon (coord scale 0..1000). Tolerant of prose.
 
+    Two accepted shapes:
+    * The composed point-grounding output: a JSON array of
+      ``{"point_2d": [x, y], "label": "<role>"}`` for a fixed set of boundary
+      roles. The polygon is assembled on the host in role order
+      (left near -> far, vanishing, right far -> near) — never emitted dense
+      by the model.
+    * A legacy dense polygon: ``{"polygon": [[x, y], ...]}`` or a bare
+      coordinate list / inline prose.
+
     Returns ``{"polygon": [[x, y], ...]}`` (possibly empty).
     """
     if not text:
         return {"polygon": []}
     data = _extract_json_block(text)
+
+    # Composed path: collect labelled point_2d boundary points, then order them.
+    point_items = _collect_point_2d(data)
+    if point_items:
+        ordered = _order_boundary_points(point_items)
+        if ordered:
+            return {"polygon": ordered}
+
     if isinstance(data, dict):
         raw = data.get("polygon")
     elif isinstance(data, list):
@@ -381,6 +409,112 @@ def parse_drivable_area(text: str) -> dict[str, Any]:
         if pair is not None:
             points.append(pair)
     return {"polygon": points}
+
+
+# Boundary-role order for the composed drivable-area point-grounding skill.
+# Left edge near->far, then the vanishing point, then the right edge far->near,
+# producing a closed polygon traversed clockwise.
+_BOUNDARY_ROLE_ORDER = (
+    "left_edge_near", "left_edge_mid", "left_edge_far",
+    "vanishing_point",
+    "right_edge_far", "right_edge_mid", "right_edge_near",
+)
+
+
+def _collect_point_2d(data: Any) -> list[tuple[list[int], str | None]]:
+    """Flatten any JSON value into a list of ([x, y], label) from point_2d."""
+    out: list[tuple[list[int], str | None]] = []
+    items: list[Any]
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict) and isinstance(data.get("points"), list):
+        items = data["points"]
+    else:
+        items = [data] if isinstance(data, dict) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        pair = _coord_pair(item.get("point_2d") or item.get("point"))
+        if pair is None:
+            continue
+        label = item.get("label") or item.get("role")
+        out.append((pair, str(label).lower() if label else None))
+    return out
+
+
+def _collect_point_2d_lane(
+    data: Any,
+) -> list[tuple[list[int], int, int]]:
+    """Collect ([x, y], lane_id, rank) tuples from point_2d lane output.
+
+    Only items carrying a point_2d coordinate AND a lane_id are returned, so
+    the drivable-area point output (which has no lane_id) is not mistaken for
+    lane output.
+    """
+    out: list[tuple[list[int], int, int]] = []
+    items: list[Any]
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict) and isinstance(data.get("points"), list):
+        items = data["points"]
+    else:
+        items = [data] if isinstance(data, dict) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        pair = _coord_pair(item.get("point_2d") or item.get("point"))
+        lane = item.get("lane_id")
+        if pair is None or lane is None:
+            continue
+        try:
+            lane_i = int(lane)
+        except (TypeError, ValueError):
+            continue
+        rank = item.get("rank")
+        try:
+            rank_i = int(rank) if rank is not None else 0
+        except (TypeError, ValueError):
+            rank_i = 0
+        out.append((pair, lane_i, rank_i))
+    return out
+
+
+def _group_lane_points(
+    points: list[tuple[list[int], int, int]],
+) -> list[dict[str, Any]]:
+    """Group ranked points into per-lane polylines, ordered by rank."""
+    by_lane: dict[int, list[tuple[int, list[int]]]] = {}
+    for pair, lane, rank in points:
+        by_lane.setdefault(lane, []).append((rank, pair))
+    lanes: list[dict[str, Any]] = []
+    for lane in sorted(by_lane):
+        ordered = [p for _, p in sorted(by_lane[lane], key=lambda r: r[0])]
+        if ordered:
+            lanes.append({"lane_id": lane, "points": ordered})
+    return lanes
+
+
+def _order_boundary_points(
+    points: list[tuple[list[int], str | None]],
+) -> list[list[int]]:
+    """Order labelled boundary points into a traversed polygon.
+
+    Labelled points are placed by their role in _BOUNDARY_ROLE_ORDER; any
+    unlabelled / unknown points are appended in encounter order. Falls back to
+    raw encounter order if none of the known labels are present.
+    """
+    by_role: dict[str, list[int]] = {}
+    extras: list[list[int]] = []
+    for pair, label in points:
+        if label and label in _BOUNDARY_ROLE_ORDER:
+            by_role[label] = pair
+        else:
+            extras.append(pair)
+    ordered: list[list[int]] = [by_role[r] for r in _BOUNDARY_ROLE_ORDER if r in by_role]
+    if not ordered:  # no recognized roles -> keep encounter order
+        return [p for p, _ in points]
+    ordered.extend(extras)
+    return ordered
 
 
 def _coord_pair(value: Any) -> list[int] | None:

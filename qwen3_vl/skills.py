@@ -415,25 +415,28 @@ DETECTION_2D = SkillSpec(
 LANE_POLYLINE = SkillSpec(
     key="lane_polyline",
     label="Lane polyline (auto-label)",
-    cookbook="auto-labelling (lane perception)",
+    cookbook="auto-labelling (point grounding -> polylines)",
     prompt=(
-        "Trace every visible road lane marking as an ordered polyline. "
-        'Output a JSON array, each item {"lane_id": 0, "points": '
-        "[[x, y], ...]} with integer coordinates in [0, 1000] relative to "
-        "image width/height, ordered from the bottom of the image (nearest) "
-        "to the top (farthest). Use one lane_id per visible lane (ego lane, "
-        "left neighbour, right neighbour, ...). "
-        "Think step by step: identify each lane marking, follow it from near "
-        "to far, and reason about its pixel coordinates before the final JSON. "
+        "Locate the points along each visible road lane marking with points, "
+        "report their point coordinates, a lane_id and an order rank in JSON "
+        'format like this: {"point_2d": [x, y], "lane_id": 0, "rank": 0}. '
+        "Use integer coordinates in [0, 1000] relative to image width/height "
+        "(x grows right, y grows down). For each visible lane emit 5 points "
+        "ordered from the bottom of the image (nearest, rank 0) to the top "
+        "(farthest, rank 4). Use lane_id 0 for the ego lane, 1 for the left "
+        "neighbour, 2 for the right neighbour. "
+        "Output only the JSON array of these points; do not reason at length. "
         "Begin the final answer with [ and end with ]."
     ),
     output_kind="lane",
     frames_kind="single_image",
     coord_scale=1000,
-    default_max_new_tokens=4096,
+    default_max_new_tokens=2048,
     notes=(
-        "Weak annotator for lane perception; points are scaled [0,1000]. "
-        "Parser recovers lane_id + points from JSON or inline 'lane N: ...'."
+        "Composed from the model's NATIVE point_2d grounding primitive: asks "
+        "for a sparse set of ranked points per lane (<=~15 points total), then "
+        "the parser assembles per-lane polylines on the host. Avoids the "
+        "cookbook's dense-instance endless-loop failure mode."
     ),
     status="draft",
 )
@@ -466,25 +469,32 @@ SCENE_GRAPH = SkillSpec(
 DRIVABLE_AREA = SkillSpec(
     key="drivable_area",
     label="Drivable area polygon (auto-label)",
-    cookbook="auto-labelling (drivable-area segmentation)",
+    cookbook="auto-labelling (point grounding -> polygon)",
     prompt=(
-        "Outline the drivable road surface in front of the ego vehicle as a "
-        "single closed polygon. "
-        'Output a JSON object {"polygon": [[x, y], ...]} with integer '
-        "coordinates in [0, 1000] relative to image width/height, ordered "
-        "clockwise and covering both the near and far road. Exclude sidewalks, "
-        "barriers and other vehicles. "
-        "Think step by step: trace the road boundary from near to far on both "
-        "sides, reason about each polygon vertex, then emit the closed polygon. "
-        "Begin the final answer with { and end with }."
+        "Locate the boundary points of the drivable road surface in front of "
+        "the ego vehicle with points, report their point coordinates and a "
+        "boundary role in JSON format like this: "
+        '{"point_2d": [x, y], "label": "role"}. Use exactly these roles and '
+        "emit one point per role, integer coordinates in [0, 1000] relative to "
+        "image width/height (x grows right, y grows down): "
+        "left_edge_near, left_edge_mid, left_edge_far, "
+        "vanishing_point, right_edge_far, right_edge_mid, right_edge_near. "
+        "Trace the left road boundary from near to far, then the vanishing "
+        "point, then the right boundary from far back to near. "
+        "Exclude sidewalks, barriers and other vehicles. "
+        "Output only the JSON array of these seven points; do not reason at "
+        "length. Begin the final answer with [ and end with ]."
     ),
     output_kind="drivable_area",
     frames_kind="single_image",
     coord_scale=1000,
-    default_max_new_tokens=4096,
+    default_max_new_tokens=1024,
     notes=(
-        "Weak annotator for drivable-area segmentation; polygon scaled "
-        "[0,1000]. Parser recovers the polygon from JSON or inline point list."
+        "Composed from the model's NATIVE point_2d grounding primitive (not a "
+        "dense polygon): asks for 7 labelled boundary points, then the parser "
+        "assembles a closed polygon on the host (left near->far, vanishing, "
+        "right far->near). Stays well below the cookbook's >40-50 point "
+        "endless-loop threshold."
     ),
     status="draft",
 )

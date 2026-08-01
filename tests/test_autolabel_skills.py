@@ -94,6 +94,26 @@ class LaneParserTest(unittest.TestCase):
         self.assertEqual(len(lanes), 1)
         self.assertEqual(len(lanes[0]["points"]), 2)
 
+    def test_point_grounding_output_grouped_into_polylines(self):
+        # The composed skill asks for ranked point_2d items per lane; the parser
+        # must group by lane_id and order each lane's points by rank, even if
+        # the model emits them interleaved.
+        text = (
+            '['
+            '{"point_2d": [800, 900], "lane_id": 1, "rank": 0},'
+            '{"point_2d": [100, 900], "lane_id": 0, "rank": 0},'
+            '{"point_2d": [120, 700], "lane_id": 0, "rank": 1},'
+            '{"point_2d": [820, 700], "lane_id": 1, "rank": 1},'
+            '{"point_2d": [140, 500], "lane_id": 0, "rank": 2}'
+            ']'
+        )
+        lanes = parse_skill("lane_polyline", text)
+        self.assertEqual(len(lanes), 2)
+        ego = next(l for l in lanes if l["lane_id"] == 0)
+        self.assertEqual(ego["points"], [[100, 900], [120, 700], [140, 500]])
+        right = next(l for l in lanes if l["lane_id"] == 1)
+        self.assertEqual(right["points"], [[800, 900], [820, 700]])
+
 
 class SceneGraphParserTest(unittest.TestCase):
     def test_strict_json_triples(self):
@@ -152,6 +172,29 @@ class DrivableAreaParserTest(unittest.TestCase):
             parse_skill("drivable_area", ""),
             {"polygon": []},
         )
+
+    def test_point_grounding_output_assembled_into_polygon(self):
+        # The composed skill asks for labelled point_2d boundary points; the
+        # parser must assemble them in role order (left near->far, vanishing,
+        # right far->near) into a single closed polygon.
+        text = (
+            '['
+            '{"point_2d": [200, 900], "label": "left_edge_near"},'
+            '{"point_2d": [350, 600], "label": "left_edge_mid"},'
+            '{"point_2d": [450, 400], "label": "left_edge_far"},'
+            '{"point_2d": [500, 320], "label": "vanishing_point"},'
+            '{"point_2d": [550, 400], "label": "right_edge_far"},'
+            '{"point_2d": [650, 600], "label": "right_edge_mid"},'
+            '{"point_2d": [800, 900], "label": "right_edge_near"}'
+            ']'
+        )
+        result = parse_skill("drivable_area", text)
+        poly = result["polygon"]
+        self.assertEqual(len(poly), 7)
+        # Role order is enforced, not encounter order.
+        self.assertEqual(poly[0], [200, 900])  # left_edge_near
+        self.assertEqual(poly[3], [500, 320])  # vanishing_point
+        self.assertEqual(poly[6], [800, 900])  # right_edge_near
 
 
 class DetectionParserTest(unittest.TestCase):
