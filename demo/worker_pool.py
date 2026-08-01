@@ -289,6 +289,13 @@ class WorkerPool:
 
         Used by the gateway SSE endpoint. Reconnect-safe: starts from
         ``after_seq`` (the snapshot sequence) and replays buffered events.
+
+        IMPORTANT: never hold ``self._lock`` across a ``yield`` — a generator
+        suspended at a yield keeps the `with` block open, and if the consumer
+        disconnects the lock is released in an unexpected thread context,
+        corrupting the (re-entrant) lock ("cannot release un-acquired lock").
+        The lock is taken only to snapshot the ready events + capture the
+        per-job condition; yielding happens after release.
         """
         deadline = None if timeout is None else time.monotonic() + timeout
         cursor = after_seq
@@ -297,20 +304,32 @@ class WorkerPool:
                 job = self._jobs.get(job_id)
                 if job is None:
                     return
-                ready = [ev for ev in job._events if ev["seq"] > cursor]
-                if ready:
-                    cursor = ready[-1]["seq"]
-                    for ev in ready:
-                        yield ev["data"]
-                    if job._done and cursor >= job.progress_seq:
-                        return
-                    continue
-                if job._done:
-                    return
+                ready = [ev["seq"] for ev in job._events if ev["seq"] > cursor]
+                done = job._done
+                last_seq = job.progress_seq
                 cond = job._cond
-            # Wait outside the pool lock for new events.
+            # Yield outside the lock.
+            if ready:
+                # Re-fetch the event payloads by seq without holding the lock
+                # across yields; copy the slice atomically first.
+                with self._lock:
+                    job = self._jobs.get(job_id)
+                    if job is None:
+                        return
+                    by_seq = {ev["seq"]: ev["data"] for ev in job._events}
+                for seq in ready:
+                    payload = by_seq.get(seq)
+                    if payload is not None:
+                        yield payload
+                cursor = ready[-1]
+                if done and cursor >= last_seq:
+                    return
+                continue
+            if done:
+                return
             if deadline is not None and time.monotonic() >= deadline:
                 return
+            # Wait for new events on the per-job condition (no pool lock held).
             with cond:
                 cond.wait(timeout=0.5)
 
