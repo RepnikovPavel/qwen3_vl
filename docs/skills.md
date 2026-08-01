@@ -58,6 +58,21 @@ hidden from the default catalog. List them with `qwen3-vl skills
 on `SkillSpec` (`status="verified" | "draft"`) and is included in
 `to_public_dict()`.
 
+**Current verdicts on Qwen3-VL-2B-Thinking-FP8** (from the e2e run, see
+`tests/test_skill_e2e_gpu.py` + `scripts/verify_skills_proprietary.sh`):
+
+| Skill | Status | Evidence |
+|---|---|---|
+| `detection_2d` | **verified** | emits many real class+bbox items (usable weak label set) |
+| `lane_polyline` | draft | sparse points / reasoning loop on dense frames |
+| `scene_graph` | draft | not reliably converged on the 2B model |
+| `drivable_area` | draft | non-convergent on the 2B model (polygon segmentation edge) |
+
+The contour skills (`lane_polyline`, `drivable_area`) are **composed** from the
+model's native `point_2d` grounding primitive (not dense polygons) — see
+below — which keeps them in the model's stable regime, but the 2B still does
+not commit to the answer reliably enough to call verified.
+
 ## Coordinate conventions
 
 The cookbooks use **two different** relative-coordinate systems — this is the
