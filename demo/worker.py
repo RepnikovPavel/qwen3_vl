@@ -75,6 +75,7 @@ class _Worker:
         # The active job: only one generation runs at a time per worker.
         self._active_job: str | None = None
         self._stop_event: threading.Event | None = None
+        self._job_thread: threading.Thread | None = None
         self._cmd_lock = threading.Lock()
 
     # --- lifecycle ----------------------------------------------------------
@@ -143,15 +144,27 @@ class _Worker:
             self._active_job = job_id
             stop_event = threading.Event()
             self._stop_event = stop_event
-        try:
-            self._run_job(job_id, cmd, stop_event)
-        except BaseException as exc:  # noqa: BLE001 — surface any failure
-            _log(f"[worker] job {job_id} crashed: {exc}\n{traceback.format_exc()}")
-            _emit_event({"job_id": job_id, "type": "error", "message": str(exc)})
-        finally:
-            with self._cmd_lock:
-                self._active_job = None
-                self._stop_event = None
+
+        # Run the generation on a separate thread so the command loop keeps
+        # reading stdin and can process a STOP mid-generation. (model.generate
+        # blocks; if it ran on the command-loop thread, STOP would sit unread
+        # in the pipe until the generation finished — defeating cancellation.)
+        def _execute() -> None:
+            try:
+                self._run_job(job_id, cmd, stop_event)
+            except BaseException as exc:  # noqa: BLE001 — surface any failure
+                _log(f"[worker] job {job_id} crashed: {exc}\n{traceback.format_exc()}")
+                _emit_event({"job_id": job_id, "type": "error", "message": str(exc)})
+            finally:
+                with self._cmd_lock:
+                    if self._active_job == job_id:
+                        self._active_job = None
+                        self._stop_event = None
+
+        job_thread = threading.Thread(target=_execute, daemon=True)
+        with self._cmd_lock:
+            self._job_thread = job_thread
+        job_thread.start()
 
     # --- the actual generation ---------------------------------------------
 
