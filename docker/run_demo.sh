@@ -48,6 +48,12 @@ docker run -d \
     --env QWEN3_WEB_PORT=7860 \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --env QWEN3_FP8_KERNEL_DIR=/opt/qwen-kernels/finegrained-fp8-v1 \
+    --env DEMO_MULTITASK="${DEMO_MULTITASK:-0}" \
+    --env DEMO_WORKERS_PER_GPU="${DEMO_WORKERS_PER_GPU:-1}" \
+    --env DEMO_WORKER_MODEL="${DEMO_WORKER_MODEL:-2b}" \
+    --env DEMO_MODEL="${DEMO_MODEL:-2b}" \
+    --env DEMO_STALL_TIMEOUT="${DEMO_STALL_TIMEOUT:-120}" \
+    --env DEMO_POOL_VERBOSE="${DEMO_POOL_VERBOSE:-0}" \
     --mount "type=bind,src=${models_dir},dst=/models,readonly" \
     --mount "type=bind,src=${state_dir},dst=/state" \
     "${image_name}" \
