@@ -1580,7 +1580,7 @@ def _build_pool_from_env(*, ckpt_dir: str, state_dir: Path) -> "WorkerPool | Non
     logs_dir = state_dir / "thinking_logs"
     kernel_dir = os.environ.get("QWEN3_FP8_KERNEL_DIR")
     model_size = os.environ.get("DEMO_WORKER_MODEL", os.environ.get("DEMO_MODEL", "2b"))
-    stall = float(os.environ.get("DEMO_STALL_TIMEOUT", "120"))
+    stall = float(os.environ.get("DEMO_STALL_TIMEOUT", "300"))
     LOGGER.info(
         "multi-task pool: gpus=%s workers/gpu=%d model=%s",
         gpu_ids, workers_per_gpu, model_size,

@@ -176,7 +176,7 @@ class WorkerPool:
         gpu_ids: list[int],
         model_size: str = "2b",
         workers_per_gpu: int = 1,
-        stall_timeout: float = 60.0,
+        stall_timeout: float = 300.0,
         verbose: bool = False,
     ) -> None:
         if not gpu_ids:

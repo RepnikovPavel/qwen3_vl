@@ -52,7 +52,7 @@ docker run -d \
     --env DEMO_WORKERS_PER_GPU="${DEMO_WORKERS_PER_GPU:-1}" \
     --env DEMO_WORKER_MODEL="${DEMO_WORKER_MODEL:-2b}" \
     --env DEMO_MODEL="${DEMO_MODEL:-2b}" \
-    --env DEMO_STALL_TIMEOUT="${DEMO_STALL_TIMEOUT:-120}" \
+    --env DEMO_STALL_TIMEOUT="${DEMO_STALL_TIMEOUT:-300}" \
     --env DEMO_POOL_VERBOSE="${DEMO_POOL_VERBOSE:-0}" \
     --mount "type=bind,src=${models_dir},dst=/models,readonly" \
     --mount "type=bind,src=${state_dir},dst=/state" \
