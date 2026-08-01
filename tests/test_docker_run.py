@@ -108,6 +108,50 @@ class DockerRunCachePolicyTest(unittest.TestCase):
         self.assertIn("demo.server", arguments)
         self.assertNotIn("/data", arguments)
 
+    def test_demo_qwen3_bind_exposes_port_on_lan(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            models = root / "models"
+            state = root / "state"
+            binaries = root / "bin"
+            arguments_path = root / "docker-arguments"
+            models.mkdir()
+            state.mkdir()
+            binaries.mkdir()
+            docker = binaries / "docker"
+            docker.write_text(
+                '#!/usr/bin/env bash\nprintf \'%s\\n\' "$@" > "$DOCKER_ARGS_FILE"\n',
+                encoding="utf-8",
+            )
+            docker.chmod(0o755)
+            environment = os.environ.copy()
+            environment["PATH"] = f"{binaries}:{environment['PATH']}"
+            environment["DOCKER_ARGS_FILE"] = str(arguments_path)
+            environment["QWEN3_STATE"] = str(state)
+            environment["QWEN3_BIND"] = "0.0.0.0"
+
+            completed = subprocess.run(
+                [
+                    str(RUN_SCRIPT),
+                    "demo",
+                    "--models",
+                    str(models),
+                    "--port",
+                    "8451",
+                ],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            arguments = arguments_path.read_text(encoding="utf-8").splitlines()
+
+        self.assertIn("0.0.0.0:8451:7860/tcp", arguments)
+        self.assertNotIn("127.0.0.1:8451:7860/tcp", arguments)
+
 
 if __name__ == "__main__":
     unittest.main()

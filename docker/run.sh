@@ -24,6 +24,8 @@ Environment:
   QWEN3_IMAGE     Container image (default qwen3-vl:trtllm-1.3.0rc20)
   QWEN3_GPUS      Docker --gpus value (default all)
   QWEN3_STATE     Persistent demo state directory (required for demo)
+  QWEN3_BIND      Bind address for web/demo port (default 127.0.0.1;
+                  set 0.0.0.0 to expose on the LAN)
 
 Arguments after -- are passed unchanged to the selected Python program.
 EOF
@@ -52,6 +54,9 @@ models_dir=""
 data_dir=""
 output_dir=""
 host_port="7860"
+# Bind address for the published port (web/demo modes). Default loopback;
+# set QWEN3_BIND=0.0.0.0 to expose on the LAN.
+bind_addr="${QWEN3_BIND:-127.0.0.1}"
 app_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -285,7 +290,7 @@ case "${mode}" in
         docker_args+=(
             --network=bridge
             --gpus "${gpu_request}"
-            --publish "127.0.0.1:${host_port}:7860/tcp"
+            --publish "${bind_addr}:${host_port}:7860/tcp"
             --env CKPTDIR=/models
             --env PORT=7860
             --env QWEN3_WEB_PORT=7860
@@ -303,7 +308,7 @@ case "${mode}" in
         docker_args+=(
             --network=bridge
             --gpus "${gpu_request}"
-            --publish "127.0.0.1:${host_port}:7860/tcp"
+            --publish "${bind_addr}:${host_port}:7860/tcp"
             --env CKPTDIR=/models
             --env DEMO_STATE_DIR=/state
             --env PORT=7860

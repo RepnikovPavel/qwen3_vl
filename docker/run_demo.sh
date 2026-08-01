@@ -4,6 +4,10 @@ set -Eeuo pipefail
 models_dir="${1:-}"
 state_dir="${2:-}"
 port="${3:-8001}"
+# Bind address for the published port. Default 127.0.0.1 (loopback only).
+# Set QWEN3_BIND=0.0.0.0 to expose the demo on the LAN (then protect the
+# network, since the demo has no built-in auth).
+bind_addr="${QWEN3_BIND:-127.0.0.1}"
 image_name="${QWEN3_IMAGE:-qwen3-vl:trtllm-1.3.0rc20}"
 container_name="${QWEN3_CONTAINER_NAME:-qwen3_vl_demo}"
 gpu_request="${QWEN3_GPUS:-all}"
@@ -30,7 +34,7 @@ docker run -d \
     --tmpfs /tmp:rw,nosuid,nodev,exec,size=8g,mode=1777 \
     --gpus "${gpu_request}" \
     --network bridge \
-    --publish "127.0.0.1:${port}:7860/tcp" \
+    --publish "${bind_addr}:${port}:7860/tcp" \
     --env HOME=/tmp \
     --env TRITON_CACHE_DIR=/tmp/triton-cache \
     --env HF_HOME=/models \
@@ -50,4 +54,9 @@ docker run -d \
     python3 -m demo.server
 
 echo "demo started: docker logs -f ${container_name}"
-echo "open http://127.0.0.1:${port} or ssh -N -L ${port}:127.0.0.1:${port} ..."
+if [[ "${bind_addr}" == "0.0.0.0" ]]; then
+    lan_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    echo "open http://${lan_ip:-<server-ip>}:${port}  (LAN, QWEN3_BIND=0.0.0.0)"
+else
+    echo "open http://127.0.0.1:${port} or ssh -N -L ${port}:127.0.0.1:${port} ..."
+fi

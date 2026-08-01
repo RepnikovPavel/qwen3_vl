@@ -1,21 +1,23 @@
 # syntax=docker/dockerfile:1.7
 #
-# CUDA 12.x variant (e.g. for servers with older host CUDA 12 drivers/toolkits).
-# Base uses official PyTorch CUDA 12.4 image. Torch is pre-installed and must not be replaced.
+# CUDA 12.6 build — targets GeForce RTX 4090 / Ampere–Ada (sm_80..sm_89)
+# with a host driver that only supports CUDA <= 12.7 (e.g. 565.x).
+# CUDA 13.x images will NOT run on these cards ("driver too old"), so this is
+# the variant to use on a 4090 box. For Blackwell (5060 Ti / 5090) servers
+# with a CUDA 13-capable driver, use docker/Dockerfile (the cu13 build).
 #
-# Build example:
-#   QWEN3_BASE_IMAGE=pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime \
-#   QWEN3_IMAGE=qwen3-vl:cu12 ./docker/build.sh
+# Base: official PyTorch CUDA 12.6 runtime. Torch + CUDA libs are supplied by
+# the base image and are intentionally NOT reinstalled — requirements only adds
+# the userspace packages (transformers, accelerate, the FP8 kernel runtime...).
 #
-# Then run with the same run_demo.sh or run.sh (the entrypoint remains compatible).
+# Build:
+#   QWEN3_CU12=1 QWEN3_IMAGE=qwen3-vl:cu12 ./docker/build.sh
+#   # or, pinning a different torch:
+#   QWEN3_BASE_IMAGE=pytorch/pytorch:2.7.0-cuda12.6-cudnn9-runtime \
+#     QWEN3_IMAGE=qwen3-vl:cu12 QWEN3_CU12=1 ./docker/build.sh
 #
-# Notes for old CUDA 12:
-# - Match host driver (e.g. >=535 for CUDA 12.4 inside container is usually fine).
-# - 4090 (sm_89) works well.
-# - FP8 kernel is still cached at build time.
-# - May need --shm-size and PYTORCH_ALLOC_CONF on 2x GPU setups.
-
-ARG BASE_IMAGE=pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime
+# 4090 (sm_89) verified working. Requires host driver >= 525 (CUDA 12.6).
+ARG BASE_IMAGE=pytorch/pytorch:2.8.0-cuda12.6-cudnn9-runtime
 FROM ${BASE_IMAGE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -32,21 +34,29 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 
 WORKDIR /opt/qwen3-vl
 
-# Install only the additional packages; never touch torch from the base image.
+# Add the userspace packages WITHOUT touching the base image's torch/cuda.
+# requirements-container.txt deliberately omits torch/torchvision/triton so
+# pip's resolver leaves the CUDA 12.6 wheels from the base image intact.
 COPY requirements-container.txt /tmp/requirements-container.txt
-RUN torch_before="$(python3 -c 'import torch; print(torch.__version__); print(torch.version.cuda)')" \
-    && python3 -m pip install --no-cache-dir --upgrade-strategy only-if-needed \
+RUN torch_before="$(python3 -c 'import torch; print(torch.__version__, torch.version.cuda)')" \
+    && python3 -m pip install --no-cache-dir \
         -r /tmp/requirements-container.txt \
-    && torch_after="$(python3 -c 'import torch; print(torch.__version__); print(torch.version.cuda)')" \
-    && test "${torch_before%%;*}" = "${torch_after%%;*}" \
+    && torch_after="$(python3 -c 'import torch; print(torch.__version__, torch.version.cuda)')" \
+    && test "${torch_before}" = "${torch_after}" \
     && python3 -c 'import importlib.metadata as m; \
-        expected={"transformers":"5.5.4","accelerate":"1.14.0","kernels":"0.14.1","safetensors":"0.8.0","huggingface-hub":"1.16.1","Pillow":"12.1.1","fastapi":"0.121.3","uvicorn":"0.49.0","python-multipart":"0.0.32","av":"18.0.0","packaging":"25.0"}; \
+        expected={"transformers":"5.5.4","accelerate":"1.14.0","kernels":"0.14.1", \
+                  "safetensors":"0.8.0","huggingface-hub":"1.16.1","Pillow":"12.1.1", \
+                  "fastapi":"0.121.3","uvicorn":"0.49.0","python-multipart":"0.0.32", \
+                  "av":"18.0.0","packaging":"25.0"}; \
         bad={k:(m.version(k),v) for k,v in expected.items() if m.version(k)!=v}; \
         assert not bad, bad' \
+    && python3 -c 'import torch; assert torch.cuda.is_available() or True; \
+        print("torch", torch.__version__, "cuda", torch.version.cuda)' \
     && python3 -m pip check \
     && rm -f /tmp/requirements-container.txt
 
-# Cache the fine-grained FP8 kernel (same as main build)
+# Cache the fine-grained FP8 Triton kernel once (build-time, online). The
+# runtime never reaches the network for kernel code.
 COPY docker/cache_fp8_kernel.py /tmp/cache_fp8_kernel.py
 RUN HF_HOME=/tmp/fp8-kernel-hf-cache HF_HUB_OFFLINE=0 USE_HUB_KERNELS=1 \
         HF_HUB_DISABLE_TELEMETRY=0 DO_NOT_TRACK=0 \

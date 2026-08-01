@@ -1,4 +1,14 @@
 # syntax=docker/dockerfile:1.7
+#
+# CUDA 13 build — targets Blackwell (RTX 5060 Ti / 5090, sm_120) and any server
+# with a CUDA 13-capable host driver. The base is the immutable TensorRT-LLM
+# 1.3.0rc20 image (NVIDIA PyTorch + CUDA 13.1). This image will NOT run on a
+# GeForce RTX 4090 / Ada box whose driver is CUDA 12.7 ("driver too old") —
+# for 4090 use docker/Dockerfile.cu12 instead.
+#
+# Build (default):
+#   ./docker/build.sh                                   # -> qwen3-vl:trtllm-1.3.0rc20
+#   QWEN3_IMAGE=qwen3-vl:cu13 ./docker/build.sh         # explicit cu13 tag
 
 ARG BASE_IMAGE=nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc20@sha256:1532b38814b3faf2affdb5ef01ca91468685d314ffb7e8926a0567595355ed88
 FROM ${BASE_IMAGE}

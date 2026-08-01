@@ -1,35 +1,41 @@
 # Container usage
 
-The image is based on the immutable TensorRT-LLM 1.3.0rc20 digest and keeps
-the NVIDIA PyTorch/TorchVision/Triton wheels supplied by that image.  The
-fine-grained FP8 Triton source is downloaded once during the build and copied
-into the image; inference does not fetch kernels or model files.
+Two CUDA variants are maintained, one per host-driver generation:
+
+| Variant | Dockerfile | Base | Target cards / driver |
+|---|---|---|---|
+| **cu13** (default) | `docker/Dockerfile` | `nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc20` (CUDA 13.1) | Blackwell RTX 5060 Ti / 5090 (sm_120), CUDA 13 driver |
+| **cu12** | `docker/Dockerfile.cu12` | `pytorch/pytorch:2.8.0-cuda12.6-cudnn9-runtime` (CUDA 12.6) | Ada RTX 4090 (sm_89), CUDA 12.x driver (e.g. 565) |
+
+CUDA 13 images **will not run** on a 4090: the host driver (CUDA 12.7) is too
+old and `torch.cuda.is_available()` returns `False`. On a 4090 box, build the
+`cu12` image. Both images keep the base image's torch/cuda wheels untouched
+and download the fine-grained FP8 Triton kernel once at build time; inference
+never reaches the network for kernels or model files.
 
 ## Build
 
-```bash
-./docker/build.sh
-```
-
-For servers using older CUDA 12.x (common on some 4090-class machines):
+cu13 (default, Blackwell):
 
 ```bash
-# Use the cu12 variant (see docker/Dockerfile.cu12)
-QWEN3_CU12=1 \
-QWEN3_IMAGE=qwen3-vl:cu12 \
-QWEN3_BASE_IMAGE=pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime \
-./docker/build.sh
+./docker/build.sh                                       # -> qwen3-vl:trtllm-1.3.0rc20
+QWEN3_IMAGE=qwen3-vl:cu13 ./docker/build.sh             # explicit cu13 tag
 ```
 
-Or override for the main file:
+cu12 (4090 / Ada):
 
 ```bash
-QWEN3_IMAGE=qwen3-vl:test \
-QWEN3_BASE_IMAGE=nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc20@sha256:... \
-./docker/build.sh
+QWEN3_CU12=1 QWEN3_IMAGE=qwen3-vl:cu12 ./docker/build.sh
 ```
 
-The build script auto-selects Dockerfile.cu12 when QWEN3_CU12=1 or image name contains "cu12".
+The build script selects the Dockerfile from `QWEN3_CU12=1` or a `cu12` tag
+(use `QWEN3_CU13=1` / a `cu13` tag to force the cu13 file). Override the base
+image explicitly if you must pin a different torch:
+
+```bash
+QWEN3_BASE_IMAGE=pytorch/pytorch:2.7.0-cuda12.6-cudnn9-runtime \
+  QWEN3_CU12=1 QWEN3_IMAGE=qwen3-vl:cu12 ./docker/build.sh
+```
 
 ## Host directories
 
@@ -68,6 +74,17 @@ Use `infer-cpu` or `benchmark-cpu` for the dequantized CPU-FP32 comparison.
 mkdir -p "$HOME/qwen3-vl-demo-state"
 ./docker/run_demo.sh "$HOME/qwen3-models" "$HOME/qwen3-vl-demo-state" 8001
 ```
+
+By default the port binds to `127.0.0.1` (loopback only). To expose the demo
+on the LAN so other machines can open it directly, set `QWEN3_BIND=0.0.0.0`:
+
+```bash
+QWEN3_BIND=0.0.0.0 \
+  ./docker/run_demo.sh "$HOME/qwen3-models" "$HOME/qwen3-vl-demo-state" 8001
+# open http://<server-ip>:8001  (the demo has no built-in auth — protect the network)
+```
+
+Otherwise keep the loopback bind and reach it through an SSH tunnel:
 
 ```bash
 ssh -N -L 8001:127.0.0.1:8001 -p SSH_PORT USER@HOST

@@ -21,15 +21,25 @@ python3 qwen3_vl.py verify all --cache-dir "$MODELS" --quick
 
 ## Контейнер и сборка
 
-```text
-nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc20@sha256:1532b38814b3faf2affdb5ef01ca91468685d314ffb7e8926a0567595355ed88
-```
+Поддерживается два варианта — по одному на поколение GPU/драйвера:
+
+| Вариант | Dockerfile | База | Карта / драйвер |
+|---|---|---|---|
+| **cu13** (по умолчанию) | `docker/Dockerfile` | `nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc20` (CUDA 13.1) | Blackwell RTX 5060 Ti / 5090 (sm_120), драйвер CUDA 13 |
+| **cu12** | `docker/Dockerfile.cu12` | `pytorch/pytorch:2.8.0-cuda12.6-cudnn9-runtime` (CUDA 12.6) | Ada RTX 4090 (sm_89), драйвер CUDA 12.x (напр. 565) |
+
+CUDA 13-образ **не запустится** на 4090: хост-драйвер (CUDA 12.7) слишком старый,
+`torch.cuda.is_available()` вернёт `False`. На 4090 собирайте `cu12`. В обоих
+образах torch/cuda от базового образа не переустанавливаются, fine-grained FP8
+Triton-ядро скачивается один раз на этапе сборки; инференс не ходит в сеть.
 
 ```bash
-QWEN3_PULL_BASE=1 ./docker/build.sh
-```
+# cu13 (Blackwell):
+QWEN3_PULL_BASE=1 ./docker/build.sh                       # -> qwen3-vl:trtllm-1.3.0rc20
 
-Результат: `qwen3-vl:trtllm-1.3.0rc20`. NVIDIA PyTorch, CUDA и Triton не переустанавливаются.
+# cu12 (4090 / Ada):
+QWEN3_CU12=1 QWEN3_IMAGE=qwen3-vl:cu12 QWEN3_PULL_BASE=1 ./docker/build.sh
+```
 
 ## Demo
 
@@ -42,6 +52,15 @@ ssh -N -L 8001:127.0.0.1:8001 USER@SERVER
 
 Открыть `http://127.0.0.1:8001`. Только FP8 CUDA; `single` — одна GPU, `balanced` — model-parallel по двум картам. Сессии и media в state-каталоге.
 
+**Доступ по LAN.** По умолчанию порт слушает `127.0.0.1` (только локально). Чтобы
+открыть демку прямо из браузера других машин в сети, поставьте `QWEN3_BIND=0.0.0.0`
+(у демки нет встроенной авторизации — защитите сеть):
+
+```bash
+QWEN3_BIND=0.0.0.0 ./docker/run_demo.sh "$MODELS" "$STATE" 8001
+# откройте http://<server-ip>:8001
+```
+
 В демо доступны разные задачи (presets) как в стандартных Qwen3-VL примерах: describe, OCR, video understanding, document parsing, spatial understanding, step-by-step reasoning + custom prompt. Поддерживается загрузка изображений и видео (в т.ч. собранных из последовательностей кадров). Для видеопотоков/длинных клипов используйте больше кадров (video_num_frames).
 
 ### Деплой на GPU-сервер
@@ -51,11 +70,14 @@ git clone https://github.com/RepnikovPavel/qwen3_vl.git "$WORK/qwen3_vl"
 cd "$WORK/qwen3_vl"
 export MODELS="$CHECKPOINT_DIR"      # HF cache root with the FP8 snapshots
 export STATE="$WORK/qwen3_vl_demo_state"
-./docker/build.sh
-./docker/run_demo.sh "$MODELS" "$STATE" 8001
+# 4090 / Ada:
+QWEN3_CU12=1 QWEN3_IMAGE=qwen3-vl:cu12 QWEN3_PULL_BASE=1 ./docker/build.sh
+# 5060 Ti / Blackwell:
+# ./docker/build.sh
+QWEN3_BIND=0.0.0.0 ./docker/run_demo.sh "$MODELS" "$STATE" 8001
 ```
 
-С ноутбука: `ssh -N -L 8001:127.0.0.1:8001 USER@SERVER` → `http://127.0.0.1:8001`. Для быстрой разработки и тестирования используйте **2B FP8** (`--model 2b`). 8B только для финальных бенчмарков и проверок точности.
+С ноутбука в LAN: откройте `http://<server-ip>:8001`, либо `ssh -N -L 8001:127.0.0.1:8001 USER@SERVER` → `http://127.0.0.1:8001`. Для быстрой разработки и тестирования используйте **2B FP8** (`--model 2b`). 8B только для финальных бенчмарков и проверок точности.
 
 ## Skills (cookbook capabilities)
 

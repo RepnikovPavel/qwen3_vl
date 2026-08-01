@@ -1,2 +1,0 @@
-[console_scripts]
-qwen3-vl = qwen3_vl:main
