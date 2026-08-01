@@ -30,9 +30,18 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     DO_NOT_TRACK=1 \
     GRADIO_ANALYTICS_ENABLED=false \
     TOKENIZERS_PARALLELISM=false \
-    PYTORCH_ALLOC_CONF=expandable_segments:True
+    PYTORCH_ALLOC_CONF=expandable_segments:True \
+    DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /opt/qwen3-vl
+
+# The fine-grained FP8 Triton kernel is JIT-compiled on first forward and needs
+# a C compiler (triton.runtime.build compiles a small CUDA helper with gcc/cc).
+# The pytorch runtime base ships none, so install build-essential explicitly.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && command -v gcc >/dev/null 2>&1
 
 # Add the userspace packages WITHOUT touching the base image's torch/cuda.
 # requirements-container.txt deliberately omits torch/torchvision/triton so
