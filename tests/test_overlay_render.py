@@ -8,7 +8,6 @@ from PIL import Image
 
 from demo.grounding_3d_viz import draw_3d_bboxes, generate_camera_params, parse_bbox_3d_from_text
 from demo.grounding_viz import draw_grounding, parse_grounding
-from demo.server import _build_skill_overlays
 from qwen3_vl.skill_parsers import parse_skill
 
 
