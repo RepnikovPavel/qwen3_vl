@@ -224,7 +224,12 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const state = { files: [], controller: null, sessionId: null, activeJobId: null, generating: false, overlays: null, liveText: "", liveTimer: null, jobsPoll: null, modelId: "2b", skillsCatalog: [] };
+const state = {
+  files: [], controller: null, sessionId: null, activeJobId: null, generating: false,
+  overlays: null,       // final server (or promoted) overlays — survive zoom
+  liveOverlays: null,   // tentative live-parse overlays during streaming
+  liveText: "", liveTimer: null, jobsPoll: null, modelId: "2b", skillsCatalog: [],
+};
 
 async function createSessionForModel(modelId) {
   const s = await fetch("/api/sessions", {
@@ -323,6 +328,7 @@ function loadViewer(src) {
   };
   img.src = src;
   state.overlays = null;
+  state.liveOverlays = null;
   $("drawBtn").disabled = true;
   $("drawBtn").classList.remove("active");
 }
@@ -397,9 +403,8 @@ $("drawBtn").addEventListener("click", () => {
 
 // ---- live overlay parsing during streaming ----
 // While the model streams its reasoning/answer, we scan the accumulated text
-// for coordinate-like patterns (bbox_2d JSON, [x1,y1,x2,y2], points) and draw
-// them on the fly so the user sees boxes appear in real time. On 'done' these
-// tentative boxes are replaced by the server's clean, parsed overlays.
+// for coordinate-like patterns and keep them in state.liveOverlays so zoom/pan
+// can repaint (canvas is cleared on every applyTransform → drawOverlays).
 function accumulateLive(chunk) {
   state.liveText += chunk;
   if (state.liveTimer) return; // throttle: parse at most every 350ms
@@ -408,49 +413,105 @@ function accumulateLive(chunk) {
     if (!state.generating || !$("drawBtn").classList.contains("active")) return;
     const live = parseLiveOverlays(state.liveText);
     if (live && live.length) {
-      // temporarily draw tentative boxes (semi-transparent)
-      drawOverlaysRaw(live, 0.55);
+      state.liveOverlays = live;
+      // Prefer final overlays if already set; else paint live set.
+      drawOverlays();
     }
   }, 350);
 }
 
 // Parse coordinate mentions from raw streaming text. Returns overlays (0..1)
-// or null. Heuristics:
-//   {"bbox_2d":[x1,y1,x2,y2] ...}  -> box (scale from skill)
-//   [x1, y1, x2, y2] / (x1,y1,x2,y2) where coords look like 0..1000 -> box
-//   [x, y] small pair -> point
+// or null. Merges bbox_2d, point_2d, and loose 4-tuples (deduped).
 function parseLiveOverlays(text) {
   const skillKey = $("skill").value;
   const scale = (skillKey === "ocr_spotting" || skillKey === "mobile_agent") ? 999 : 1000;
   const out = [];
-  // 1. strict bbox_2d JSON fragments
-  const reBbox = /bbox_2d"\s*:\s*\[\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*\]/g;
+  const seen = new Set();
+  function pushBox(x1, y1, x2, y2, label) {
+    if (!(validCoord(x1,scale)&&validCoord(y1,scale)&&validCoord(x2,scale)&&validCoord(y2,scale))) return;
+    // reject degenerate / inverted-ish noise
+    if (Math.abs(x2 - x1) < 1 && Math.abs(y2 - y1) < 1) return;
+    const key = `b:${Math.round(x1)},${Math.round(y1)},${Math.round(x2)},${Math.round(y2)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({kind:"box", pts:[[x1/scale,y1/scale],[x2/scale,y2/scale]], label: label || ""});
+  }
+  function pushPt(x, y, label) {
+    if (!(validCoord(x,scale)&&validCoord(y,scale))) return;
+    const key = `p:${Math.round(x)},${Math.round(y)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({kind:"point", pts:[[x/scale,y/scale]], label: label || ""});
+  }
   let m;
+  // 1. strict bbox_2d / point_2d JSON fragments (single or double quotes)
+  const reBbox = /bbox_2d["']?\s*:\s*\[\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*\]/g;
   while ((m = reBbox.exec(text)) !== null) {
-    const [x1,y1,x2,y2] = [m[1],m[2],m[3],m[4]].map(Number);
-    if (validCoord(x1,scale)&&validCoord(y1,scale)&&validCoord(x2,scale)&&validCoord(y2,scale))
-      out.push({kind:"box", pts:[[x1/scale,y1/scale],[x2/scale,y2/scale]], label:""});
+    pushBox(+m[1], +m[2], +m[3], +m[4], "");
   }
-  // 1b. point_2d JSON fragments
-  const rePt = /point_2d"\s*:\s*\[\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*\]/g;
+  const rePt = /point_2d["']?\s*:\s*\[\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*\]/g;
   while ((m = rePt.exec(text)) !== null) {
-    const [x,y] = [m[1],m[2]].map(Number);
-    if (validCoord(x,scale)&&validCoord(y,scale))
-      out.push({kind:"point", pts:[[x/scale,y/scale]], label:""});
+    pushPt(+m[1], +m[2], "");
   }
-  // 2. loose 4-number tuples like [0, 517, 42, 567]
-  if (!out.length) {
-    const re4 = /[\(\[]\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*[\)\]]/g;
-    while ((m = re4.exec(text)) !== null) {
-      const [x1,y1,x2,y2] = [m[1],m[2],m[3],m[4]].map(Number);
-      if (validCoord(x1,scale)&&validCoord(y1,scale)&&validCoord(x2,scale)&&validCoord(y2,scale))
-        out.push({kind:"box", pts:[[x1/scale,y1/scale],[x2/scale,y2/scale]], label:""});
-      if (out.length > 80) break;
-    }
+  // 1c. label near bbox: "car": [x1,y1,x2,y2] or - car [x1,...]
+  const reLabeled = /["']([A-Za-z][\w\s\-]{0,40})["']\s*:\s*\[\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*\]/g;
+  while ((m = reLabeled.exec(text)) !== null) {
+    pushBox(+m[2], +m[3], +m[4], +m[5], m[1].trim());
+  }
+  // 2. loose 4-number tuples — always merge (not only when empty)
+  const re4 = /[\(\[]\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*[\)\]]/g;
+  while ((m = re4.exec(text)) !== null) {
+    const [x1,y1,x2,y2] = [+m[1], +m[2], +m[3], +m[4]];
+    // Prefer axis-aligned boxes: x2>x1 and y2>y1 (or near)
+    if (x2 > x1 && y2 > y1) pushBox(x1, y1, x2, y2, "");
+    if (out.length > 120) break;
   }
   return out.length ? out : null;
 }
 function validCoord(v, scale) { return v >= 0 && v <= scale; }
+
+/** Active overlay set for paint: final > live. */
+function currentOverlays() {
+  if (state.overlays && state.overlays.length) return state.overlays;
+  if (state.liveOverlays && state.liveOverlays.length) return state.liveOverlays;
+  return null;
+}
+
+/** Union of overlay lists, deduped by rounded normalized geometry. */
+function mergeOverlaySets(...sets) {
+  const out = [];
+  const seen = new Set();
+  for (const set of sets) {
+    if (!set || !set.length) continue;
+    for (const item of set) {
+      const pts = item.pts || [];
+      const key = item.kind + ":" + pts.map(p =>
+        (Array.isArray(p) ? p.map(v => Math.round(Number(v) * 1000) / 1000).join(",") : "")
+      ).join("|");
+      if (seen.has(key)) {
+        // Prefer item with a label if we already have an unlabeled clone.
+        if (item.label) {
+          const prev = out.find(o => {
+            const pk = o.kind + ":" + (o.pts || []).map(p =>
+              (Array.isArray(p) ? p.map(v => Math.round(Number(v) * 1000) / 1000).join(",") : "")
+            ).join("|");
+            return pk === key && !o.label;
+          });
+          if (prev) prev.label = item.label;
+        }
+        continue;
+      }
+      seen.add(key);
+      out.push({
+        kind: item.kind,
+        pts: pts.map(p => [Number(p[0]), Number(p[1])]),
+        label: item.label || "",
+        extra: item.extra || {},
+      });
+    }
+  }
+  return out;
+}
 
 const OVERLAY_COLORS = ["#ff5d5d","#5dff8a","#5dc8ff","#ffd95d","#c25dff","#5dffe1","#ffa55d","#ff5dc4"];
 const EDGES3D = [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
@@ -498,18 +559,24 @@ function _paintOverlays(ov, alpha) {
   });
   viewer.ctx.restore();
 }
-// Draw final overlays (state.overlays). Only when draw button is active.
+// Repaint overlays after zoom/pan/stream. Always clears then redraws so
+// live boxes do not vanish when applyTransform() runs on every wheel event.
 function drawOverlays(force) {
   if (!viewer.ctx || !viewer.naturalW) return;
   viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
   if (!$("drawBtn").classList.contains("active") && !force) return;
-  _paintOverlays(state.overlays, 1.0);
+  const ov = currentOverlays();
+  if (!ov || !ov.length) return;
+  // Final overlays full opacity; live-only set slightly transparent.
+  const alpha = (state.overlays && state.overlays.length) ? 1.0 : 0.7;
+  _paintOverlays(ov, alpha);
 }
-// Draw arbitrary overlays at a given alpha (used for live/tentative boxes).
+// Draw arbitrary overlays at a given alpha and remember as live set.
 function drawOverlaysRaw(ov, alpha) {
   if (!viewer.ctx || !viewer.naturalW) return;
+  if (ov && ov.length) state.liveOverlays = ov;
   viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
-  _paintOverlays(ov, alpha);
+  _paintOverlays(ov, alpha == null ? 0.7 : alpha);
 }
 
 $("send").addEventListener("click", () => state.generating ? stopGen() : startGen());
@@ -533,10 +600,11 @@ async function startGen() {
   $("viz").innerHTML = ""; $("hero").style.display = "none";
   // reset overlays / live parsing for the new generation
   state.overlays = null;
+  state.liveOverlays = null;
   state.liveText = "";
   if (state.liveTimer) { clearTimeout(state.liveTimer); state.liveTimer = null; }
   // auto-enable live drawing while streaming (so tentative boxes appear)
-  $("drawBtn").disabled = true;
+  $("drawBtn").disabled = false;
   $("drawBtn").classList.add("active");
   $("drawBtn").textContent = "Draw overlays (live)";
   viewer.ctx && viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
@@ -646,24 +714,43 @@ function handle(ev) {
         setStatus("idle", `${fr} · ${r.generated_tokens || 0} tok`);
       }
       if (ev.structured && ev.structured.value) showStructured(ev.structured);
-      // stop live parsing and replace tentative boxes with the clean final set
+      // stop live parsing; merge server overlays with client re-parse of full text
       if (state.liveTimer) { clearTimeout(state.liveTimer); state.liveTimer = null; }
-      const ov = ev.structured && ev.structured.overlays;
-      if (Array.isArray(ov) && ov.length) {
-        state.overlays = ov;
+      // One more live pass on full accumulated text (thinking + answer)
+      const fullText = [
+        $("reasoning").textContent || "",
+        $("answer").textContent || "",
+        r.reasoning || "",
+        r.answer || "",
+        state.liveText || "",
+      ].join("\n");
+      const clientOv = parseLiveOverlays(fullText) || [];
+      const serverOv = (ev.structured && Array.isArray(ev.structured.overlays))
+        ? ev.structured.overlays : [];
+      // Prefer the larger usable set (server often cleaner labels; client may catch more)
+      const merged = mergeOverlaySets(serverOv, clientOv, state.liveOverlays);
+      if (merged.length) {
+        state.overlays = merged;
+        state.liveOverlays = null;
         $("drawBtn").disabled = false;
         $("drawBtn").classList.add("active");
-        $("drawBtn").textContent = `Draw overlays (${ov.length})`;
-        // repaint with full opacity over the streamed tentative boxes
-        _paintOverlays(ov, 1.0);
+        $("drawBtn").textContent = `Draw overlays (${merged.length})`;
+        drawOverlays(true);
       } else {
-        state.overlays = null;
-        // keep any live-drawn tentative boxes (if live parse found coords)
-        $("drawBtn").disabled = false;
-        const n = state.overlays ? 0 : 0;
-        $("drawBtn").textContent = "Draw overlays";
-        if (!$("drawBtn").classList.contains("active"))
-          viewer.ctx && viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
+        // Keep live overlays if any, so zoom still works
+        if (state.liveOverlays && state.liveOverlays.length) {
+          state.overlays = state.liveOverlays;
+          state.liveOverlays = null;
+          $("drawBtn").disabled = false;
+          $("drawBtn").classList.add("active");
+          $("drawBtn").textContent = `Draw overlays (${state.overlays.length})`;
+          drawOverlays(true);
+        } else {
+          state.overlays = null;
+          $("drawBtn").disabled = false;
+          $("drawBtn").textContent = "Draw overlays";
+          drawOverlays();
+        }
       }
       break;
     }

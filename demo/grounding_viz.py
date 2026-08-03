@@ -75,47 +75,113 @@ def parse_grounding(text: str) -> list[dict[str, Any]]:
     """Best-effort parse of grounding JSON from model text.
     Handles strict JSON objects and also loose [x1,y1,x2,y2] or [x,y] mentions in text.
     Returns list of dicts with "bbox_2d" or "point_2d" + generated label.
+
+    Always merges JSON hits with loose regex hits (Thinking models often put
+    only a subset in a clean JSON block and more boxes inline in prose).
     """
     if not text:
         return []
-    out = []
+    out: list[dict[str, Any]] = []
+    seen: set[tuple] = set()
+
+    def _add_box(x1: int, y1: int, x2: int, y2: int, label: str) -> None:
+        if x2 < x1:
+            x1, x2 = x2, x1
+        if y2 < y1:
+            y1, y2 = y2, y1
+        if x2 - x1 < 1 and y2 - y1 < 1:
+            return
+        key = ("b", x1, y1, x2, y2)
+        if key in seen:
+            return
+        seen.add(key)
+        out.append({"bbox_2d": [x1, y1, x2, y2], "label": label})
+
+    def _add_pt(x: int, y: int, label: str) -> None:
+        key = ("p", x, y)
+        if key in seen:
+            return
+        seen.add(key)
+        out.append({"point_2d": [x, y], "label": label})
+
     cleaned = _clean_json_text(text)
 
-    # 1. Try strict JSON first
+    # 1. Strict JSON (array / object / nested)
     try:
         data = json.loads(cleaned)
         if isinstance(data, dict):
             data = [data]
         if isinstance(data, list):
             for item in data:
-                if isinstance(item, dict) and ("bbox_2d" in item or "point_2d" in item):
-                    out.append(item)
+                if not isinstance(item, dict):
+                    if isinstance(item, (list, tuple)) and len(item) >= 4:
+                        try:
+                            _add_box(int(item[0]), int(item[1]), int(item[2]), int(item[3]), "obj")
+                        except (TypeError, ValueError):
+                            pass
+                    continue
+                label = str(item.get("label") or item.get("name") or item.get("class") or "")
+                if "bbox_2d" in item and isinstance(item["bbox_2d"], (list, tuple)) and len(item["bbox_2d"]) >= 4:
+                    b = item["bbox_2d"]
+                    try:
+                        _add_box(int(b[0]), int(b[1]), int(b[2]), int(b[3]), label)
+                    except (TypeError, ValueError):
+                        pass
+                if "point_2d" in item and isinstance(item["point_2d"], (list, tuple)) and len(item["point_2d"]) >= 2:
+                    p = item["point_2d"]
+                    try:
+                        _add_pt(int(p[0]), int(p[1]), label)
+                    except (TypeError, ValueError):
+                        pass
     except Exception:
         pass
 
-    if out:
-        return out
+    # 1b. Multiple JSON arrays in text (thinking dumps several blocks)
+    for m in re.finditer(r"\[\s*\{.*?\}\s*(?:,\s*\{.*?\}\s*)*\]", text, flags=re.DOTALL):
+        chunk = m.group(0)
+        try:
+            data = json.loads(chunk)
+        except Exception:
+            continue
+        if not isinstance(data, list):
+            continue
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or item.get("name") or item.get("class") or "")
+            if "bbox_2d" in item and isinstance(item["bbox_2d"], (list, tuple)) and len(item["bbox_2d"]) >= 4:
+                b = item["bbox_2d"]
+                try:
+                    _add_box(int(b[0]), int(b[1]), int(b[2]), int(b[3]), label)
+                except (TypeError, ValueError):
+                    pass
+            if "point_2d" in item and isinstance(item["point_2d"], (list, tuple)) and len(item["point_2d"]) >= 2:
+                p = item["point_2d"]
+                try:
+                    _add_pt(int(p[0]), int(p[1]), label)
+                except (TypeError, ValueError):
+                    pass
 
-    # 2. Fallback: extract loose coordinate lists from the raw text
-    # bbox like [282, 522, 359, 589] or (282,522,359,589)
-    bbox_pattern = re.compile(r'[\(\[]\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*[\)\]]')
+    # 2. Loose bbox tuples — always merge
+    bbox_pattern = re.compile(
+        r"[\(\[]\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*[\)\]]"
+    )
     for i, m in enumerate(bbox_pattern.finditer(text)):
         x1, y1, x2, y2 = map(int, m.groups())
-        out.append({"bbox_2d": [x1, y1, x2, y2], "label": f"obj{i+1}"})
+        if x2 > x1 and y2 > y1:
+            _add_box(x1, y1, x2, y2, f"obj{i + 1}")
 
-    if out:
-        return out
+    # 3. Explicit point_2d fragments
+    for m in re.finditer(
+        r'point_2d["\']?\s*:\s*\[\s*(\d{1,4})\s*,\s*(\d{1,4})\s*\]', text
+    ):
+        _add_pt(int(m.group(1)), int(m.group(2)), "pt")
 
-    # 3. Points [x, y]
-    point_pattern = re.compile(r'[\(\[]\s*(\d+)\s*,\s*(\d+)\s*[\)\]]')
-    seen = set()
-    for i, m in enumerate(point_pattern.finditer(text)):
-        x, y = map(int, m.groups())
-        key = (x, y)
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append({"point_2d": [x, y], "label": f"pt{i+1}"})
+    # 4. Bare [x, y] only if we still have nothing spatial (avoid eating box pairs)
+    if not out:
+        point_pattern = re.compile(r"[\(\[]\s*(\d{1,4})\s*,\s*(\d{1,4})\s*[\)\]]")
+        for i, m in enumerate(point_pattern.finditer(text)):
+            _add_pt(int(m.group(1)), int(m.group(2)), f"pt{i + 1}")
 
     return out
 

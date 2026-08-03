@@ -1116,12 +1116,54 @@ def create_app(
         assert snap is not None
         snapshot_events, last_seq = snap
 
+        def _enrich_pool_done(event: dict[str, Any]) -> dict[str, Any]:
+            """Attach skill overlays to the done event BEFORE the client sees it.
+
+            Previously overlays were computed only in _finalize_pool_turn after
+            the SSE stream ended, so the UI never received structured.overlays
+            on the multi-task (pool) path.
+            """
+            if event.get("type") != "done":
+                return event
+            enriched = dict(event)
+            final_answer = enriched.get("answer") or ""
+            final_reasoning = enriched.get("reasoning") or ""
+            combined = f"{final_answer} {final_reasoning}"
+            if "</think>" in combined:
+                marker_pos = combined.rfind("</think>")
+                before = combined[:marker_pos]
+                after = combined[marker_pos + 8 :]
+                if not final_reasoning:
+                    final_reasoning = before.rsplit("<think>", 1)[-1].strip() or final_reasoning
+                if after.strip():
+                    final_answer = after.strip()
+                enriched["answer"] = final_answer
+                enriched["reasoning"] = final_reasoning
+            structured = build_structured_result(task, final_answer) or {}
+            structured = dict(structured) if structured else {}
+            if skill:
+                overlay_text = "\n".join(
+                    part for part in (final_answer, final_reasoning) if part
+                )
+                if overlay_text.strip():
+                    overlays, image_size = _build_skill_overlays(
+                        skill, overlay_text, session_id, store, media_root,
+                    )
+                    if overlays is not None:
+                        structured["overlays"] = overlays
+                        structured["image_size"] = image_size
+            if structured:
+                enriched["structured"] = structured
+            return enriched
+
         def event_source() -> Iterator[str]:
             yield _sse({"type": "job", "job_id": job_id, "session_id": session_id})
             cursor = last_seq
             done_event: dict[str, Any] | None = None
             # Replay buffered snapshot first (reconnect-safe).
             for event in snapshot_events:
+                if event.get("type") == "done":
+                    event = _enrich_pool_done(event)
                 yield _sse(event)
                 if event.get("type") in {"done", "error"}:
                     done_event = event
@@ -1129,6 +1171,8 @@ def create_app(
             for event in pool.events(job_id, after_seq=cursor):
                 if event.get("type") == "_closed":
                     break
+                if event.get("type") == "done":
+                    event = _enrich_pool_done(event)
                 yield _sse(event)
                 if event.get("type") in {"done", "error"}:
                     done_event = event
@@ -1170,14 +1214,18 @@ def create_app(
                 if after.strip():
                     final_answer = after.strip()
             structured = build_structured_result(task, final_answer)
-            if skill and final_answer:
-                overlays, image_size = _build_skill_overlays(
-                    skill, final_answer, session_id, store, media_root,
+            if skill:
+                overlay_text = "\n".join(
+                    part for part in (final_answer, final_reasoning) if part
                 )
-                if overlays is not None:
-                    structured = dict(structured) if structured else {}
-                    structured["overlays"] = overlays
-                    structured["image_size"] = image_size
+                if overlay_text.strip():
+                    overlays, image_size = _build_skill_overlays(
+                        skill, overlay_text, session_id, store, media_root,
+                    )
+                    if overlays is not None:
+                        structured = dict(structured) if structured else {}
+                        structured["overlays"] = overlays
+                        structured["image_size"] = image_size
             assistant_content = final_answer
             if not assistant_content and not final_reasoning:
                 assistant_content = (
@@ -1443,12 +1491,20 @@ def create_app(
                     )
                     # For coordinate-bearing skills, parse model output into
                     # normalized overlays (0..1) the client can draw on a canvas.
+                    # Thinking models often emit boxes inside <think> — parse
+                    # answer + reasoning so we do not drop them.
                     overlays = None
                     image_size = None
-                    if skill and final_answer:
-                        overlays, image_size = _build_skill_overlays(
-                            skill, final_answer, session_id, store, media_root
+                    if skill:
+                        overlay_text = "\n".join(
+                            part
+                            for part in (final_answer, final_reasoning, result.answer, result.reasoning)
+                            if part
                         )
+                        if overlay_text.strip():
+                            overlays, image_size = _build_skill_overlays(
+                                skill, overlay_text, session_id, store, media_root
+                            )
                     if overlays is not None:
                         structured = dict(structured) if structured else {}
                         structured["overlays"] = overlays
