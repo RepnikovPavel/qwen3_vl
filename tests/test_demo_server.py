@@ -410,6 +410,8 @@ class DemoServerTest(unittest.TestCase):
 
     def test_session_model_provenance_cannot_be_changed(self):
         session = self.create_session(model_id="2b")
+        # Non-empty history locks the model.
+        self.store.append_message(session["id"], "user", "hello")
         response = self.client.post(
             "/api/chat",
             data={
@@ -421,6 +423,25 @@ class DemoServerTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("session model differs", response.json()["detail"])
         self.assertEqual(self.generation_mock.call_count, 0)
+
+    def test_empty_session_can_rebind_fp8_model(self):
+        """UI may create session as 2b then switch to 8b before first message."""
+        session = self.create_session(model_id="2b")
+        self.assertEqual(session["messages"], [])
+        self.assertEqual(session["media"], [])
+        response = self.client.post(
+            "/api/chat",
+            data={
+                "session_id": session["id"],
+                "model_id": "8b",
+                "task": "describe",
+                "custom_prompt": "hi",
+            },
+        )
+        # generation is mocked; accept 200 streaming or any non-409 success path
+        self.assertNotEqual(response.status_code, 409, response.text)
+        reloaded = self.store.get_session(session["id"])
+        self.assertEqual(reloaded["model_id"], "8b")
 
     def test_stop_and_reattach_return_snapshot_and_persist_stopped_result(self):
         session = self.create_session()

@@ -133,6 +133,15 @@ class SessionStoreTest(unittest.TestCase):
         self.assertEqual(private["stored_path"], stored_path)
         self.assertEqual(private["metadata"], {"height": 480, "width": 640})
 
+    def test_set_model_id_and_is_empty(self):
+        session = self.store.create_session(model_id="2b")
+        self.assertTrue(self.store.is_empty(session["id"]))
+        self.assertTrue(self.store.set_model_id(session["id"], "8b"))
+        loaded = self.store.get_session(session["id"])
+        self.assertEqual(loaded["model_id"], "8b")
+        self.store.append_message(session["id"], "user", "hi")
+        self.assertFalse(self.store.is_empty(session["id"]))
+
     def test_reset_clears_conversation_and_returns_media_paths(self):
         session = self.store.create_session(title="Before reset")
         message = self.store.append_message(session["id"], "user", "Prompt")

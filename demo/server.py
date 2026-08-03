@@ -511,9 +511,14 @@ def _build_skill_overlays(
             if not bbox_3d or len(bbox_3d) < 9:
                 continue
             corners = convert_3dbbox(list(bbox_3d), cam)
-            if len(corners) < 8:
+            # Keep 8 slots; drop Nones after normalize so UI can still wireframe.
+            poly = []
+            for c in corners:
+                if c is None:
+                    continue
+                poly.append([c[0] / w, c[1] / h])
+            if len(poly) < 2:
                 continue
-            poly = [[c[0] / w, c[1] / h] for c in corners]
             overlays.append({
                 "kind": "poly", "pts": poly,
                 "label": item.get("label", ""),
@@ -897,11 +902,15 @@ def create_app(
             inputs, _, _ = move_inputs_to_model_devices(rt.model, inputs)
 
             import torch
+            # Thinking FP8 models loop under greedy; match chat sampling defaults.
             with torch.inference_mode():
                 out = rt.model.generate(
                     **inputs,
                     max_new_tokens=max_new_tokens,
-                    do_sample=False,
+                    do_sample=True,
+                    temperature=0.6,
+                    top_p=0.95,
+                    top_k=20,
                     return_dict_in_generate=True,
                 )
             cont = out.sequences[:, inputs["input_ids"].shape[1] :]
@@ -1010,7 +1019,15 @@ def create_app(
 
             import torch
             with torch.inference_mode():
-                out = rt.model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False, return_dict_in_generate=True)
+                out = rt.model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=True,
+                    temperature=0.6,
+                    top_p=0.95,
+                    top_k=20,
+                    return_dict_in_generate=True,
+                )
             cont = out.sequences[:, inputs["input_ids"].shape[1]:]
             raw = rt.processor.batch_decode(cont, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
             clean_text = raw.strip()
@@ -1234,17 +1251,46 @@ def create_app(
                 user_prompt = (custom_prompt or "").strip()
                 effective_prompt = user_prompt or resolved["prompt"]
                 if resolved.get("task") == "grounding_2d" and effective_prompt:
-                    # Use phrasing from the official cookbooks to force trained JSON output.
-                    # Explicitly ask for <think> tags so thinking and final JSON are separated.
-                    if "Report bbox coordinates in JSON format" not in effective_prompt:
-                        effective_prompt = effective_prompt.rstrip() + (
-                            ' First write your step-by-step reasoning inside <think> and </think> tags. '
-                            'After the </think> output ONLY a JSON array like [{"bbox_2d": [x1, y1, x2, y2], "label": "car"}]. '
-                            'No text after the closing think tag.'
-                        )
+                    # Cookbook-aligned schema suffix. Do NOT force bbox when the
+                    # user/skill asked for points (point_2d / "with points").
+                    pl = effective_prompt.lower()
+                    wants_points = (
+                        "point_2d" in pl
+                        or "with points" in pl
+                        or "point coordinates" in pl
+                        or "locate the points" in pl
+                    )
+                    wants_bbox = (
+                        "bbox_2d" in pl
+                        or "bounding box" in pl
+                        or "report bbox" in pl
+                    )
+                    has_json_hint = (
+                        "json format" in pl
+                        or "json array" in pl
+                        or "bbox_2d" in pl
+                        or "point_2d" in pl
+                    )
+                    if not has_json_hint:
+                        if wants_points and not wants_bbox:
+                            effective_prompt = effective_prompt.rstrip() + (
+                                ' Output point coordinates in JSON format like '
+                                '[{"point_2d": [x, y], "label": "object"}].'
+                            )
+                        elif wants_points and wants_bbox:
+                            effective_prompt = effective_prompt.rstrip() + (
+                                ' Report coordinates in JSON format using bbox_2d and/or point_2d.'
+                            )
+                        else:
+                            effective_prompt = effective_prompt.rstrip() + (
+                                ' Report bbox coordinates in JSON format.'
+                            )
                 if resolved.get("task") == "grounding_3d" and effective_prompt:
                     if "provide its 3D bounding box" not in effective_prompt.lower() and "bbox_3d" not in effective_prompt.lower():
-                        effective_prompt = effective_prompt.rstrip() + ' Provide 3D bounding boxes in JSON format.'
+                        effective_prompt = effective_prompt.rstrip() + (
+                            ' Provide 3D bounding boxes in JSON format: '
+                            '[{"bbox_3d":[x_center,y_center,z_center,x_size,y_size,z_size,roll,pitch,yaw],"label":"category"}].'
+                        )
                 model_key = normalize_model_size(model_id)
                 if placement not in PLACEMENTS:
                     raise ValueError(f"unsupported placement: {placement}")
@@ -1262,10 +1308,22 @@ def create_app(
                 if session["model_id"] is not None:
                     session_model = normalize_model_size(session["model_id"])
                     if session_model != model_key:
-                        raise HTTPException(
-                            409,
-                            "session model differs from the requested FP8 model; start a new session",
+                        # Empty session (no history/media): rebind model instead of 409.
+                        # UI also creates a fresh session on model change; this covers
+                        # reset-then-switch and API clients that reuse an empty id.
+                        empty = (
+                            not session.get("messages")
+                            and not session.get("media")
                         )
+                        if empty:
+                            store.set_model_id(session_id, model_key)
+                        else:
+                            raise HTTPException(
+                                409,
+                                "session model differs from the requested FP8 model; start a new session",
+                            )
+                else:
+                    store.set_model_id(session_id, model_key)
                 with generations_lock:
                     existing = generations.get(session_id)
                 if existing is not None and not existing.done:

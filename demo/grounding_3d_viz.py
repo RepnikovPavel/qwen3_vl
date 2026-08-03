@@ -104,17 +104,23 @@ def _rotate_xyz(point, pitch_deg, yaw_deg, roll_deg):
 
     return [x3, y3, z3]
 
-def convert_3dbbox(bbox_3d: list[float], cam_params: dict[str, float]) -> list[list[float]]:
-    """Project 3D bbox (center + size + euler) to 2D image corners."""
+def convert_3dbbox(bbox_3d: list[float], cam_params: dict[str, float]) -> list[list[float] | None]:
+    """Project 3D bbox (center + size + euler deg) to 2D image corners.
+
+    Returns a length-8 list aligned with the local corner order. Entries may be
+    None when the corner is behind the camera (Z<=0) so callers can still draw
+    partial wireframes (matches cookbook edge connectivity).
+    """
     if len(bbox_3d) < 9:
         return []
+    # Cookbook convert_3dbbox unpack order (pitch, yaw, roll) + deg2rad.
     x, y, z, sx, sy, sz, pitch, yaw, roll = bbox_3d[:9]
     hx, hy, hz = sx / 2, sy / 2, sz / 2
     local = [
         [hx, hy, hz], [hx, hy, -hz], [hx, -hy, hz], [hx, -hy, -hz],
         [-hx, hy, hz], [-hx, hy, -hz], [-hx, -hy, hz], [-hx, -hy, -hz],
     ]
-    img_corners = []
+    img_corners: list[list[float] | None] = []
     for corner in local:
         rx, ry, rz = _rotate_xyz(corner, pitch, yaw, roll)
         X, Y, Z = rx + x, ry + y, rz + z
@@ -122,6 +128,8 @@ def convert_3dbbox(bbox_3d: list[float], cam_params: dict[str, float]) -> list[l
             ix = cam_params["fx"] * (X / Z) + cam_params["cx"]
             iy = cam_params["fy"] * (Y / Z) + cam_params["cy"]
             img_corners.append([ix, iy])
+        else:
+            img_corners.append(None)
     return img_corners
 
 EDGES = [
@@ -146,21 +154,26 @@ def draw_3d_bboxes(image: Image.Image, cam_params: dict[str, float], bbox_3d_lis
         color = ["red", "green", "blue", "yellow", "magenta", "cyan"][i % 6]
 
         corners = convert_3dbbox(bbox_3d, cam_params)
-        if len(corners) < 8:
+        if not corners:
             continue
-
+        drawn = False
         for a, b in EDGES:
+            ca, cb = (corners[a] if a < len(corners) else None), (corners[b] if b < len(corners) else None)
+            if ca is None or cb is None:
+                continue
             try:
-                p1 = (int(corners[a][0]), int(corners[a][1]))
-                p2 = (int(corners[b][0]), int(corners[b][1]))
+                p1 = (int(ca[0]), int(ca[1]))
+                p2 = (int(cb[0]), int(cb[1]))
                 draw.line([p1, p2], fill=color, width=2)
+                drawn = True
             except Exception:
                 continue
 
-        if draw_labels and label:
-            # label near first corner
-            cx, cy = int(corners[0][0]), int(corners[0][1])
-            draw.text((cx + 4, cy + 4), str(label), fill=color, font=_FONT)
+        if draw_labels and label and drawn:
+            first = next((c for c in corners if c is not None), None)
+            if first is not None:
+                cx, cy = int(first[0]), int(first[1])
+                draw.text((cx + 4, cy + 4), str(label), fill=color, font=_FONT)
 
     return img
 

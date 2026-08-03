@@ -246,6 +246,38 @@ class SessionStore:
             finally:
                 connection.close()
 
+    def set_model_id(self, session_id: str, model_id: str | None) -> bool:
+        """Bind or clear the session's model_id (empty sessions only at call sites)."""
+        validated_session_id = self._uuid(session_id, "session_id")
+        validated_model_id = self._optional_text(
+            model_id,
+            "model_id",
+            MAX_MODEL_ID_CHARACTERS,
+        )
+        now = time.time()
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                cursor = connection.execute(
+                    "UPDATE sessions SET model_id = ?, updated_at = ? WHERE id = ?",
+                    (validated_model_id, now, validated_session_id),
+                )
+                connection.commit()
+                return cursor.rowcount == 1
+            except BaseException:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+
+    def is_empty(self, session_id: str) -> bool:
+        """True if the session exists and has no messages and no media."""
+        session = self.get_session(session_id)
+        if session is None:
+            return False
+        return not session.get("messages") and not session.get("media")
+
     def delete_session(self, session_id: str) -> list[Path] | None:
         validated_session_id = self._uuid(session_id, "session_id")
         with self._lock:

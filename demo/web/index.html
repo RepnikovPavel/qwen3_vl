@@ -224,7 +224,18 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const state = { files: [], controller: null, sessionId: null, activeJobId: null, generating: false, overlays: null, liveText: "", liveTimer: null, jobsPoll: null };
+const state = { files: [], controller: null, sessionId: null, activeJobId: null, generating: false, overlays: null, liveText: "", liveTimer: null, jobsPoll: null, modelId: "2b", skillsCatalog: [] };
+
+async function createSessionForModel(modelId) {
+  const s = await fetch("/api/sessions", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ model_id: modelId || "2b" }),
+  }).then(r => r.json());
+  state.sessionId = s.id;
+  state.modelId = modelId || s.model_id || "2b";
+  return s;
+}
 
 (async function init() {
   try {
@@ -234,18 +245,30 @@ const state = { files: [], controller: null, sessionId: null, activeJobId: null,
     ]);
     models.models.forEach(m => $("model").add(new Option(`${m.id.toUpperCase()} FP8`, m.id)));
     $("skill").add(new Option("custom (free prompt)", "custom"));
-    skills.skills.forEach(s => $("skill").add(new Option(s.label, s.key)));
+    state.skillsCatalog = skills.skills || [];
+    state.skillsCatalog.forEach(s => $("skill").add(new Option(s.label, s.key)));
     $("skill").addEventListener("change", () => {
       if ($("skill").value === "custom") return;
-      const spec = skills.skills.find(s => s.key === $("skill").value);
+      const spec = state.skillsCatalog.find(s => s.key === $("skill").value);
       if (spec && spec.prompt) $("prompt").value = spec.prompt;
+    });
+    // Switching FP8 size must start a new session (history is model-bound).
+    $("model").addEventListener("change", async () => {
+      const modelId = $("model").value || "2b";
+      if (modelId === state.modelId && state.sessionId) return;
+      try {
+        await createSessionForModel(modelId);
+        setStatus("idle", `session → ${modelId.toUpperCase()} FP8`);
+      } catch (e) {
+        setStatus("err", "failed to create session for model");
+      }
     });
   } catch (e) {
     setStatus("err", "failed to load models/skills");
   }
   try {
-    const s = await fetch("/api/sessions", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ model_id: "2b" }) }).then(r => r.json());
-    state.sessionId = s.id;
+    const modelId = $("model").value || "2b";
+    await createSessionForModel(modelId);
   } catch (e) { /* server will create one */ }
 })();
 
@@ -408,6 +431,13 @@ function parseLiveOverlays(text) {
     if (validCoord(x1,scale)&&validCoord(y1,scale)&&validCoord(x2,scale)&&validCoord(y2,scale))
       out.push({kind:"box", pts:[[x1/scale,y1/scale],[x2/scale,y2/scale]], label:""});
   }
+  // 1b. point_2d JSON fragments
+  const rePt = /point_2d"\s*:\s*\[\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*\]/g;
+  while ((m = rePt.exec(text)) !== null) {
+    const [x,y] = [m[1],m[2]].map(Number);
+    if (validCoord(x,scale)&&validCoord(y,scale))
+      out.push({kind:"point", pts:[[x/scale,y/scale]], label:""});
+  }
   // 2. loose 4-number tuples like [0, 517, 42, 567]
   if (!out.length) {
     const re4 = /[\(\[]\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*[\)\]]/g;
@@ -489,8 +519,14 @@ async function startGen() {
   if (!prompt && state.files.length === 0) return;
   const modelId = $("model").value || "2b";
   const skillKey = $("skill").value;
-  const task = skillKey.startsWith("2d_grounding") ? "grounding_2d"
-             : skillKey.startsWith("3d_grounding") ? "grounding_3d"
+  // Map skill → demo task mode (max tokens / viz). Prefer skill catalog output_kind.
+  const _spec = state.skillsCatalog.find(s => s.key === skillKey);
+  const _ok = _spec && _spec.output_kind;
+  const task = (skillKey === "3d_grounding" || _ok === "grounding_3d") ? "grounding_3d"
+             : (skillKey === "2d_grounding" || skillKey === "spatial_understanding"
+                || skillKey === "omni_recognition" || skillKey === "detection_2d"
+                || skillKey === "ocr_spotting" || _ok === "grounding_2d"
+                || _ok === "lane" || _ok === "drivable_area") ? "grounding_2d"
              : "custom";
   $("reasoning").textContent = ""; $("answer").textContent = "";
   $("reasonPill").textContent = ""; $("answerPill").textContent = "";
@@ -506,12 +542,18 @@ async function startGen() {
   viewer.ctx && viewer.ctx.clearRect(0, 0, viewer.canvas.width, viewer.canvas.height);
   setGen(true); setStatus("live", "loading model…");
 
+  // Keep session model in sync with the selector (new session if needed).
+  if (modelId !== state.modelId || !state.sessionId) {
+    try { await createSessionForModel(modelId); } catch (e) {}
+  }
+  const skillKeyResolved = $("skill").value || "";
+  const skillSpec = state.skillsCatalog.find(s => s.key === skillKeyResolved);
   const form = new FormData();
   form.append("session_id", state.sessionId || "");
   form.append("model_id", modelId);
   form.append("placement", "single");
   form.append("task", task);
-  form.append("skill", $("skill").value || "");
+  form.append("skill", skillKeyResolved === "custom" ? "" : skillKeyResolved);
   form.append("custom_prompt", prompt || "");
   form.append("max_new_tokens", $("maxTokens").value);
   // Full input resolution (no resize): the model sees the image as uploaded.
@@ -520,6 +562,8 @@ async function startGen() {
   form.append("do_sample", "true");
   form.append("temperature", $("temperature").value);
   form.append("top_p", $("topP").value);
+  const vframes = skillSpec && skillSpec.video_num_frames ? skillSpec.video_num_frames : 32;
+  form.append("video_num_frames", String(vframes));
   if (state.files.length) {
     try { await fetch(`/api/sessions/${state.sessionId}/reset`, { method: "POST" }); } catch(e) {}
     for (const item of state.files) form.append("files", item.file, item.file.name);

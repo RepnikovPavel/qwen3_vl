@@ -1,0 +1,141 @@
+# Official Qwen3-VL cookbook → local skill matrix.
+# Assets live under QWEN3_COOKBOOK_ROOT (default: sibling Qwen3-VL/cookbooks).
+# Every *.ipynb must appear at least once.
+
+- cookbook: 2d_grounding.ipynb
+  skill: 2d_grounding
+  asset: assets/spatial_understanding/dining_table.png
+  prompt: 'Locate every instance that belongs to the following categories: "plate/dish, bowl, cup, person". Report bbox coordinates in JSON format.'
+  expect:
+    parse_min: 1
+    overlay_kinds: [box]
+    annotated_pixels_changed: true
+    ui_sse_overlays: true
+
+- cookbook: 2d_grounding.ipynb
+  skill: 2d_grounding
+  case: points
+  asset: assets/spatial_understanding/football_field.jpg
+  prompt: 'Locate every person inside the football field with points, report their point coordinates, role(player, referee or unknown) and shirt color in JSON format like this: {"point_2d": [x, y], "label": "person", "role": "player/referee/unknown", "shirt_color": "the person''s shirt color"}'
+  expect:
+    parse_min: 1
+    overlay_kinds: [point]
+    annotated_pixels_changed: true
+    ui_sse_overlays: true
+
+- cookbook: spatial_understanding.ipynb
+  skill: spatial_understanding
+  asset: assets/spatial_understanding/spatio_case1.jpg
+  prompt: 'Locate objects by their spatial position. When asked for a location, output point coordinates in JSON format like {"point_2d": [x, y], "label": "object"}.'
+  expect:
+    parse_min: 0
+    overlay_kinds: [point]
+    annotated_pixels_changed: true
+    ui_sse_overlays: true
+    notes: prompt may need a concrete locate question at runtime
+
+- cookbook: 3d_grounding.ipynb
+  skill: 3d_grounding
+  asset: assets/spatial_understanding/autonomous_driving.jpg
+  cam_infos: assets/spatial_understanding/cam_infos.json
+  prompt: 'Find all cars in this image. For each car, provide its 3D bounding box. The output format required is JSON: [{"bbox_3d":[x_center, y_center, z_center, x_size, y_size, z_size, roll, pitch, yaw],"label":"category"}].'
+  expect:
+    parse_min: 1
+    overlay_kinds: [poly]
+    annotated_pixels_changed: true
+    ui_sse_overlays: true
+
+- cookbook: omni_recognition.ipynb
+  skill: omni_recognition
+  asset: assets/omni_recognition
+  prompt: 'Identify every main subject in the image and return each with its bounding box and name in JSON format.'
+  expect:
+    parse_min: 1
+    overlay_kinds: [box]
+    annotated_pixels_changed: true
+
+- cookbook: ocr.ipynb
+  skill: ocr
+  asset: assets/ocr
+  prompt: 'Read all the text in the image. Preserve line breaks. Return only the text content.'
+  expect:
+    parse_min: 0
+    text_min_chars: 1
+
+- cookbook: ocr.ipynb
+  skill: ocr_spotting
+  asset: assets/ocr
+  prompt: "Spotting all the text in the image with line-level, and output in JSON format as [{'bbox_2d': [x1, y1, x2, y2], 'text_content': 'text'}, ...]."
+  expect:
+    parse_min: 1
+    overlay_kinds: [box]
+    coord_scale: 999
+    annotated_pixels_changed: true
+    ui_sse_overlays: true
+
+- cookbook: document_parsing.ipynb
+  skill: document_parsing_html
+  asset: assets/document_parsing
+  prompt: 'qwenvl html'
+  expect:
+    text_min_chars: 10
+
+- cookbook: document_parsing.ipynb
+  skill: document_parsing_md
+  asset: assets/document_parsing
+  prompt: 'qwenvl markdown'
+  expect:
+    text_min_chars: 10
+
+- cookbook: long_document_understanding.ipynb
+  skill: long_document
+  asset: assets
+  prompt: 'These are consecutive pages of a document. Read them in order and answer the question. Be precise and reference page content.'
+  expect:
+    text_min_chars: 1
+    multi_image: true
+
+- cookbook: video_understanding.ipynb
+  skill: video_understanding
+  asset: assets
+  prompt: 'Analyze the video in detail. Describe the sequence of events, key actions, objects, any visible text or signs, and how the scene evolves over time. Be precise and chronological.'
+  expect:
+    text_min_chars: 20
+    video: true
+
+- cookbook: think_with_images.ipynb
+  skill: think_detailed
+  asset: assets/spatial_understanding/dining_table.png
+  prompt: 'Examine the visual input carefully. Think step by step (internal reasoning first), then provide a clear, well-structured final answer.'
+  expect:
+    text_min_chars: 20
+    no_loop: true
+
+- cookbook: mmcode.ipynb
+  skill: mmcode
+  asset: assets/multimodal_coding
+  prompt: 'Analyze this screenshot and convert it to clean, functional and modern HTML code.'
+  expect:
+    text_min_chars: 20
+
+- cookbook: computer_use.ipynb
+  skill: computer_use
+  asset: assets/computer_use
+  prompt: "You are a GUI agent. Analyze the screenshot and decide the next action to accomplish the task. Output a JSON action with a 'coordinate' in [0,1000] logical display space when a click/move is needed."
+  expect:
+    text_min_chars: 5
+
+- cookbook: mobile_agent.ipynb
+  skill: mobile_agent
+  asset: assets/agent_function_call
+  prompt: "You are a mobile GUI agent. Analyze the screenshot and decide the next action. Output a JSON action with a 'coordinate' in [0,999] logical screen space when a tap is needed."
+  expect:
+    text_min_chars: 5
+
+- cookbook: german_document_ocr.ipynb
+  skill: ocr
+  asset: assets/ocr
+  prompt: 'Read all the text in the image. Preserve line breaks. Return only the text content.'
+  expect:
+    text_min_chars: 1
+    notes: cookbook used Qwen2-VL; reproduced on Qwen3-VL Thinking FP8
